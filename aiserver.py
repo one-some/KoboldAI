@@ -4200,7 +4200,7 @@ def apiactionsubmit_generate(txt, minimum, maximum):
         torch.cuda.empty_cache()
 
     # Submit input text to generator
-    _genout, already_generated = tpool.execute(_generate, txt, minimum, maximum, set())
+    _genout, already_generated = tpool.execute(raw_generate, txt, minimum, maximum, set())
 
     genout = [applyoutputformatting(utils.decodenewlines(tokenizer.decode(tokens[-already_generated:]))) for tokens in _genout]
 
@@ -4608,7 +4608,7 @@ def calcsubmit(txt):
 # Send text to generator and deal with output
 #==================================================================#
 
-def _generate(
+def raw_generate(
     tokens: list[int],
     gen_amount: int,
     max_context_length: int,
@@ -4767,7 +4767,7 @@ def generate(
     # Submit input text to generator
     try:
         genout, already_generated = tpool.execute(
-            _generate,
+            raw_generate,
             tokens,
             gen_amount=koboldai_vars.genamt,
             max_context_length=koboldai_vars.max_length,

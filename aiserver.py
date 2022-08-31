@@ -1867,9 +1867,6 @@ def patch_transformers():
             if koboldai_vars.standalone:
                 return False
             
-            # TODO: FIX THE SCANNY THINGEY!!!
-            return False
-
             assert input_ids.ndim == 2
             assert len(self.excluded_world_info) == input_ids.shape[0]
             self.regeneration_required = koboldai_vars.lua_koboldbridge.regeneration_required
@@ -4612,6 +4609,7 @@ def raw_generate(
     tokens: list[int],
     gen_amount: int,
     max_context_length: int,
+    found_entries: list,
     # found_entries,
     seed: Optional[int] = None,
     soft_prompt: Optional[torch.Tensor] = None,
@@ -4654,8 +4652,8 @@ def raw_generate(
         in_tensor = in_tensor.to("cpu")
 
     # TODO: ?????????????????
-    # model.kai_scanner_excluded_world_info = found_entries
-    model.kai_scanner_excluded_world_info = []
+    model.kai_scanner_excluded_world_info = found_entries
+    # model.kai_scanner_excluded_world_info = []
 
     # TODO ????
     koboldai_vars._actions = koboldai_vars.actions
@@ -4771,6 +4769,7 @@ def generate(
             tokens,
             gen_amount=koboldai_vars.genamt,
             max_context_length=koboldai_vars.max_length,
+            found_entries=found_entries,
             seed=koboldai_vars.seed if koboldai_vars.full_determinism else None,
             soft_prompt=koboldai_vars.sp,
             batch_count=koboldai_vars.numseqs,

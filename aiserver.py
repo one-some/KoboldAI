@@ -1852,15 +1852,23 @@ def patch_transformers():
             scores: torch.FloatTensor,
             **kwargs,
         ) -> bool:
+            # TODO: Tie this in less with koboldai_vars
             koboldai_vars.generated_tkns += 1
-            if(not koboldai_vars.standalone and koboldai_vars.lua_koboldbridge.generated_cols and koboldai_vars.generated_tkns != koboldai_vars.lua_koboldbridge.generated_cols):
+
+            if not koboldai_vars.standalone and koboldai_vars.lua_koboldbridge.generated_cols and koboldai_vars.generated_tkns != koboldai_vars.lua_koboldbridge.generated_cols:
                 raise RuntimeError(f"Inconsistency detected between KoboldAI Python and Lua backends ({koboldai_vars.generated_tkns} != {koboldai_vars.lua_koboldbridge.generated_cols})")
-            if(koboldai_vars.abort or koboldai_vars.generated_tkns >= koboldai_vars.genamt):
+
+            # TODO: 
+            if koboldai_vars.abort or koboldai_vars.generated_tkns >= koboldai_vars.genamt:
                 self.regeneration_required = False
                 self.halt = False
                 return True
-            if(koboldai_vars.standalone):
+
+            if koboldai_vars.standalone:
                 return False
+            
+            # TODO: FIX THE SCANNY THINGEY!!!
+            return False
 
             assert input_ids.ndim == 2
             assert len(self.excluded_world_info) == input_ids.shape[0]
@@ -4600,71 +4608,114 @@ def calcsubmit(txt):
 # Send text to generator and deal with output
 #==================================================================#
 
-def _generate(txt, minimum, maximum, found_entries):
-    if(koboldai_vars.full_determinism):
-        torch.manual_seed(koboldai_vars.seed)
+def _generate(
+    tokens: list[int],
+    gen_amount: int,
+    max_context_length: int,
+    # found_entries,
+    seed: Optional[int] = None,
+    soft_prompt: Optional[torch.Tensor] = None,
+    batch_count: int = 1,
+    bad_words_ids: Optional[list] = None,
+):
+    # HOW 2 MIGRATE:
+    # seed should be None unless koboldai_vars.full_determinism is True
+    # seed formerly koboldai_vars.seed
+    # soft_prompt = vars.sp
+    # gen_amount = vars.genamt
+    # max_context_length = vars.max_length
+    # batch_count = numseqs
+    # bad_words_ids, defaults to vars.badwordsids
 
-    gen_in = torch.tensor(txt, dtype=torch.long)[None]
-    if(koboldai_vars.sp is not None):
+    if not bad_words_ids:
+        bad_words_ids = koboldai_vars.badwordsids
+
+    # Seed can be 0, check for None specifically.
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    in_tensor = torch.tensor(tokens, dtype=torch.long)[None]
+
+    if soft_prompt is not None:
         soft_tokens = torch.arange(
             model.config.vocab_size,
-            model.config.vocab_size + koboldai_vars.sp.shape[0],
+            model.config.vocab_size + soft_prompt.shape[0],
         )
-        gen_in = torch.cat((soft_tokens[None], gen_in), dim=-1)
-    assert gen_in.shape[-1] + koboldai_vars.genamt <= koboldai_vars.max_length
+        in_tensor = torch.cat((soft_tokens[None], in_tensor), dim=-1)
 
-    if(koboldai_vars.hascuda and koboldai_vars.usegpu):
-        gen_in = gen_in.to(koboldai_vars.gpu_device)
-    elif(koboldai_vars.hascuda and koboldai_vars.breakmodel):
-        gen_in = gen_in.to(breakmodel.primary_device)
+    assert in_tensor.shape[-1] + gen_amount <= max_context_length
+
+    # Move input to the right device; defined by user settings
+    if koboldai_vars.hascuda and koboldai_vars.usegpu:
+        in_tensor = in_tensor.to(koboldai_vars.gpu_device)
+    elif koboldai_vars.hascuda and koboldai_vars.breakmodel:
+        in_tensor = in_tensor.to(breakmodel.primary_device)
     else:
-        gen_in = gen_in.to('cpu')
+        in_tensor = in_tensor.to("cpu")
 
-    model.kai_scanner_excluded_world_info = found_entries
+    # TODO: ?????????????????
+    # model.kai_scanner_excluded_world_info = found_entries
+    model.kai_scanner_excluded_world_info = []
 
+    # TODO ????
     koboldai_vars._actions = koboldai_vars.actions
     koboldai_vars._prompt = koboldai_vars.prompt
+
+    # TODO: ???????????
     if(koboldai_vars.dynamicscan):
         koboldai_vars._actions = [x for x in koboldai_vars.actions]
+    
+    print(f"{in_tensor=}")
 
-    with torch.no_grad():
+    # Probably works
+    # with torch.no_grad():
+    with torch.inference_mode():
         already_generated = 0
-        numseqs = koboldai_vars.numseqs
+
         while True:
             genout = generator(
-                gen_in, 
+                in_tensor, 
                 do_sample=True, 
                 max_length=int(2e9),
                 repetition_penalty=1.0,
-                bad_words_ids=koboldai_vars.badwordsids,
+                bad_words_ids=bad_words_ids,
                 use_cache=True,
-                num_return_sequences=numseqs
-                )
-            already_generated += len(genout[0]) - len(gen_in[0])
-            assert already_generated <= koboldai_vars.genamt
-            if(model.kai_scanner.halt or not model.kai_scanner.regeneration_required):
+                num_return_sequences=batch_count
+            )
+            print(f"{genout=}")
+
+            already_generated += len(genout[0]) - len(in_tensor[0])
+            assert already_generated <= gen_amount
+
+            print(f"{already_generated=} {gen_amount=}")
+            if model.kai_scanner.halt or not model.kai_scanner.regeneration_required:
                 break
+
             assert genout.ndim >= 2
-            assert genout.shape[0] == koboldai_vars.numseqs
-            if(koboldai_vars.lua_koboldbridge.generated_cols and koboldai_vars.generated_tkns != koboldai_vars.lua_koboldbridge.generated_cols):
-                raise RuntimeError("Inconsistency detected between KoboldAI Python and Lua backends")
-            if(already_generated != koboldai_vars.generated_tkns):
-                raise RuntimeError("WI scanning error")
-            for r in range(koboldai_vars.numseqs):
-                for c in range(already_generated):
-                    assert koboldai_vars.lua_koboldbridge.generated[r+1][c+1] is not None
-                    genout[r][genout.shape[-1] - already_generated + c] = koboldai_vars.lua_koboldbridge.generated[r+1][c+1]
+            assert genout.shape[0] == batch_count
+
+            # TODO: Move to normal generate function
+            # if(koboldai_vars.lua_koboldbridge.generated_cols and koboldai_vars.generated_tkns != koboldai_vars.lua_koboldbridge.generated_cols):
+            #     raise RuntimeError("Inconsistency detected between KoboldAI Python and Lua backends")
+
+            # if(already_generated != koboldai_vars.generated_tkns):
+            #     raise RuntimeError("WI scanning error")
+
+            # for r in range(batch_count):
+            #     for c in range(already_generated):
+            #         assert koboldai_vars.lua_koboldbridge.generated[r+1][c+1] is not None
+            #         genout[r][genout.shape[-1] - already_generated + c] = koboldai_vars.lua_koboldbridge.generated[r+1][c+1]
+
             encoded = []
-            for i in range(koboldai_vars.numseqs):
-                txt = utils.decodenewlines(tokenizer.decode(genout[i, -already_generated:]))
-                winfo, mem, anotetxt, _found_entries = calcsubmitbudgetheader(txt, force_use_txt=True, actions=koboldai_vars._actions)
-                found_entries[i].update(_found_entries)
-                if koboldai_vars.alt_gen:
-                   txt, _, _ = koboldai_vars.calc_ai_text(submitted_text=txt)
-                   print("Using Alt Gen: {}".format(tokenizer.decode(txt)))
-                else:
-                    txt, _, _ = calcsubmitbudget(len(koboldai_vars._actions), winfo, mem, anotetxt, koboldai_vars._actions, submission=txt)
-                encoded.append(torch.tensor(txt, dtype=torch.long, device=genout.device))
+
+            for i in range(batch_count):
+                decoded_text = utils.decodenewlines(tokenizer.decode(genout[i, -already_generated:]))
+                
+                # NOTE: New gen only!!!
+                new_tokens, _, _ = koboldai_vars.calc_ai_text(submitted_text=decoded_text)
+
+                encoded.append(torch.tensor(new_tokens, dtype=torch.long, device=genout.device))
+
             max_length = len(max(encoded, key=len))
             encoded = torch.stack(tuple(torch.nn.functional.pad(e, (max_length - len(e), 0), value=model.config.pad_token_id or model.config.eos_token_id) for e in encoded))
             genout = torch.cat(
@@ -4674,24 +4725,28 @@ def _generate(txt, minimum, maximum, found_entries):
                 ),
                 dim=-1
             )
-            if(koboldai_vars.sp is not None):
+
+            if soft_prompt is not None:
                 soft_tokens = torch.arange(
                     model.config.vocab_size,
-                    model.config.vocab_size + koboldai_vars.sp.shape[0],
+                    model.config.vocab_size + soft_prompt.shape[0],
                     device=genout.device,
                 )
-                genout = torch.cat((soft_tokens.tile(koboldai_vars.numseqs, 1), genout), dim=-1)
-            assert genout.shape[-1] + koboldai_vars.genamt - already_generated <= koboldai_vars.max_length
-            diff = genout.shape[-1] - gen_in.shape[-1]
-            minimum += diff
-            maximum += diff
-            gen_in = genout
-            numseqs = 1
+                genout = torch.cat((soft_tokens.tile(batch_count, 1), genout), dim=-1)
+
+            assert genout.shape[-1] + gen_amount - already_generated <= max_context_length
+            in_tensor = genout
+            batch_count = 1
     
     return genout, already_generated
     
 
-def generate(txt, minimum, maximum, found_entries=None):    
+def generate(
+    tokens: list[int],
+    minimum,
+    maximum,
+    found_entries=None
+):    
     koboldai_vars.generated_tkns = 0
 
     if(found_entries is None):
@@ -4699,10 +4754,10 @@ def generate(txt, minimum, maximum, found_entries=None):
     found_entries = tuple(found_entries.copy() for _ in range(koboldai_vars.numseqs))
 
     if not koboldai_vars.quiet:
-        print("{0}Min:{1}, Max:{2}, Txt:{3}{4}".format(colors.YELLOW, minimum, maximum, utils.decodenewlines(tokenizer.decode(txt)), colors.END))
+        print("{0}Min:{1}, Max:{2}, Txt:{3}{4}".format(colors.YELLOW, minimum, maximum, utils.decodenewlines(tokenizer.decode(tokens)), colors.END))
 
     # Store context in memory to use it for comparison with generated content
-    koboldai_vars.lastctx = utils.decodenewlines(tokenizer.decode(txt))
+    koboldai_vars.lastctx = utils.decodenewlines(tokenizer.decode(tokens))
 
     # Clear CUDA cache if using GPU
     if(koboldai_vars.hascuda and (koboldai_vars.usegpu or koboldai_vars.breakmodel)):
@@ -4711,7 +4766,16 @@ def generate(txt, minimum, maximum, found_entries=None):
 
     # Submit input text to generator
     try:
-        genout, already_generated = tpool.execute(_generate, txt, minimum, maximum, found_entries)
+        genout, already_generated = tpool.execute(
+            _generate,
+            tokens,
+            gen_amount=koboldai_vars.genamt,
+            max_context_length=koboldai_vars.max_length,
+            seed=koboldai_vars.seed if koboldai_vars.full_determinism else None,
+            soft_prompt=koboldai_vars.sp,
+            batch_count=koboldai_vars.numseqs,
+        )
+           
     except Exception as e:
         if(issubclass(type(e), lupa.LuaError)):
             koboldai_vars.lua_koboldbridge.obliterate_multiverse()

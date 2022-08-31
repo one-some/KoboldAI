@@ -489,18 +489,16 @@ input[type="range"]::-ms-fill-upper {
 	filter: brightness(40%);
 }
 
-.settings_button > span {
-	right: 2px;
-}
-
 .settings_button > .material-icons-outlined {
 	position: relative;
 	top: 3px;
+	right: 2px;
 }
 
 .settings_button > .button_label {
 	position: relative;
 	bottom: 3px;
+	right: 4px;
 }
 
 .settings_select {

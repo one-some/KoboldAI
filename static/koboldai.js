@@ -272,6 +272,7 @@ function do_story_text_updates(data) {
 		span.classList.add("rawtext");
 		span.classList.add("chunk");
 		span.chunk = data.value.id;
+		span.setAttribute("tabindex", 0);
 		span.original_text = data.value.action['Selected Text'];
 		story_area.oldChunks.push(data.value.id);
 

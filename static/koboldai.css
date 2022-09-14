@@ -1188,8 +1188,8 @@ body {
   display: none;
 }
 
-[contenteditable="true"]:active,
-[contenteditable="true"]:focus{
+[contenteditable="true"] .chunk:active,
+[contenteditable="true"] .chunk:focus {
   border:none;
   outline:none;
   color: var(--text_edit);

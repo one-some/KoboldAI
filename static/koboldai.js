@@ -3724,8 +3724,6 @@ $(document).ready(function(){
 					id: chunkID,
 					text: "",
 				});
-
-				assign_world_info_to_action(item, null);
 			}
 		}
 

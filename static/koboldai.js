@@ -244,8 +244,10 @@ function create_options(data) {
 }
 
 function do_story_text_updates(data) {
-	story_area = document.getElementById('Selected Text');
+	let story_area = document.getElementById('Selected Text');
+	if (!("oldChunks" in story_area)) story_area.oldChunks = [];
 	current_chunk_number = data.value.id;
+
 	if (document.getElementById('Selected Text Chunk '+data.value.id)) {
 		var item = document.getElementById('Selected Text Chunk '+data.value.id);
 		//clear out the item first
@@ -268,8 +270,12 @@ function do_story_text_updates(data) {
 		var span = document.createElement("span");
 		span.id = 'Selected Text Chunk '+data.value.id;
 		span.classList.add("rawtext");
+		span.classList.add("chunk");
 		span.chunk = data.value.id;
 		span.original_text = data.value.action['Selected Text'];
+		story_area.oldChunks.push(data.value.id);
+
+		/*
 		span.setAttribute("contenteditable", true);
 		span.onblur = function () {
 			if (this.textContent != this.original_text) {
@@ -278,6 +284,8 @@ function do_story_text_updates(data) {
 				this.classList.add("pulse");
 			}
 		}
+		*/
+
 		span.onkeydown = detect_enter_text;
 		new_span = document.createElement("span");
 		new_span.textContent = data.value.action['Selected Text'];
@@ -1370,6 +1378,7 @@ function load_model() {
 }
 
 function world_info_entry_used_in_game(data) {
+	console.info(data, world_info_data)
 	world_info_data[data.uid]['used_in_game'] = data['used_in_game'];
 	world_info_card = document.getElementById("world_info_"+data.uid);
 	if (data.used_in_game) {
@@ -3714,6 +3723,42 @@ $(document).ready(function(){
 
 	debugContainer.addEventListener("click", function(e) {
 		debugContainer.classList.add("hidden");
+	});
+
+	// Gametext
+	const gameText = document.getElementById("Selected Text");
+	gameText.oldChunks = [];
+	gameText.addEventListener("blur", function(event) {
+		for (const chunkID of gameText.oldChunks) {
+			const chunk = document.getElementById(`Selected Text Chunk ${chunkID}`);
+			if (!chunk) {
+				console.log("Deleted", chunkID)
+
+				socket.emit("Set Selected Text", {
+					id: chunkID,
+					text: "",
+				});
+
+				assign_world_info_to_action(item, null);
+			}
+		}
+
+		let chunkIDs = [];
+		for (const chunk of document.getElementsByClassName("chunk")) {
+			if (chunk.original_text === chunk.textContent) continue;
+
+			// Send to server and update!
+			socket.emit("Set Selected Text", {
+				id: chunk.chunk,
+				text: chunk.textContent
+			});
+
+			chunk.original_text = chunk.textContent;
+			chunk.classList.add("pulse");
+			chunkIDs.push(chunk.chunk);
+		}
+
+		gameText.oldChunks = chunkIDs;
 	});
 });
 

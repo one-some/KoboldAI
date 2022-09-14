@@ -275,17 +275,6 @@ function do_story_text_updates(data) {
 		span.original_text = data.value.action['Selected Text'];
 		story_area.oldChunks.push(data.value.id);
 
-		/*
-		span.setAttribute("contenteditable", true);
-		span.onblur = function () {
-			if (this.textContent != this.original_text) {
-				socket.emit("Set Selected Text", {"id": this.chunk, "text": this.textContent});
-				this.original_text = this.textContent;
-				this.classList.add("pulse");
-			}
-		}
-		*/
-
 		span.onkeydown = detect_enter_text;
 		new_span = document.createElement("span");
 		new_span.textContent = data.value.action['Selected Text'];
@@ -1378,7 +1367,6 @@ function load_model() {
 }
 
 function world_info_entry_used_in_game(data) {
-	console.info(data, world_info_data)
 	world_info_data[data.uid]['used_in_game'] = data['used_in_game'];
 	world_info_card = document.getElementById("world_info_"+data.uid);
 	if (data.used_in_game) {
@@ -3732,8 +3720,6 @@ $(document).ready(function(){
 		for (const chunkID of gameText.oldChunks) {
 			const chunk = document.getElementById(`Selected Text Chunk ${chunkID}`);
 			if (!chunk) {
-				console.log("Deleted", chunkID)
-
 				socket.emit("Set Selected Text", {
 					id: chunkID,
 					text: "",

@@ -700,7 +700,7 @@ class model_settings(settings):
             
 class story_settings(settings):
     local_only_variables = ['socketio', 'tokenizer', 'koboldai_vars', 'no_save', 'revisions']
-    no_save_variables = ['socketio', 'tokenizer', 'koboldai_vars', 'context', 'no_save', 'prompt_in_ai', 'authornote_length', 'prompt_length', 'memory_length']
+    no_save_variables = ['socketio', 'tokenizer', 'koboldai_vars', 'context', 'no_save', 'prompt_in_ai', 'authornote_length', 'prompt_length', 'memory_length', 'attentions']
     settings_name = "story"
     def __init__(self, socketio, koboldai_vars, tokenizer=None):
         self.socketio = socketio
@@ -774,6 +774,7 @@ class story_settings(settings):
             # {"target": "(r)", "substitution": "®", "enabled": False},
             # {"target": "(tm)", "substitution": "™", "enabled": False},
         ]
+        self.attentions = []
         
         #must be at bottom
         self.no_save = False  #Temporary disable save (doesn't save with the file)

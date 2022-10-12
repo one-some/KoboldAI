@@ -5234,7 +5234,8 @@ def raw_generate(
             prompt_tokens=prompt_tokens,
             max_new=max_new,
             batch_count=batch_count,
-            gen_settings=gen_settings
+            gen_settings=gen_settings,
+            is_core=is_core,
         )
         result = GenerationResult(
             out_batches=batch_encoded, prompt=prompt_tokens, is_whole_generation=True
@@ -5244,7 +5245,8 @@ def raw_generate(
             prompt_tokens=prompt_tokens,
             max_new=max_new,
             batch_count=batch_count,
-            gen_settings=gen_settings
+            gen_settings=gen_settings,
+            is_core=is_core,
         )
         result = GenerationResult(
             out_batches=batch_encoded, prompt=prompt_tokens, is_whole_generation=True
@@ -5254,7 +5256,8 @@ def raw_generate(
             prompt_tokens=prompt_tokens,
             max_new=max_new,
             batch_count=batch_count,
-            gen_settings=gen_settings
+            gen_settings=gen_settings,
+            is_core=is_core,
         )
         result = GenerationResult(
             out_batches=batch_encoded, prompt=prompt_tokens, is_whole_generation=True, output_includes_prompt=True
@@ -5267,7 +5270,8 @@ def raw_generate(
             do_streaming=do_streaming,
             do_dynamic_wi=do_dynamic_wi,
             batch_count=batch_count,
-            gen_settings=gen_settings
+            gen_settings=gen_settings,
+            is_core=is_core,
         )
         result = GenerationResult(
             out_batches=batch_encoded,
@@ -5325,6 +5329,7 @@ def torch_raw_generate(
     do_streaming: bool = False,
     do_dynamic_wi: bool = False,
     batch_count: int = 1,
+    is_core: bool = False,
 ):
 
     koboldai_vars.inference_config.do_streaming = do_streaming
@@ -5349,7 +5354,7 @@ def torch_raw_generate(
     gen_in = gen_in.to(device)
 
     with torch.no_grad():
-        genout = generator(
+        out = generator(
             gen_in, 
             do_sample=True, 
             max_length=min(len(prompt_tokens) + max_new, koboldai_vars.max_length),
@@ -5357,7 +5362,30 @@ def torch_raw_generate(
             bad_words_ids=koboldai_vars.badwordsids,
             use_cache=True,
             num_return_sequences=batch_count,
+            output_attentions=True,
+            return_dict_in_generate=True,
         )
+
+        genout = out["sequences"]
+
+        # Lock to batch count 1 for now
+        if is_core and batch_count == 1:
+            shape = [
+                len(out["attentions"]),
+                len(out["attentions"][-1]),
+            ]
+
+            shape += list(out["attentions"][-1][-1].shape)
+
+            print(f"genin {gen_in.shape}")
+            print(f"genout {genout.shape}")
+            print(f"shappe=={shape}")
+
+            # gen amount, layers, batches, layers, batches(?), sequence length
+
+
+            # print(np.array(att, dtype=object).shape)
+            koboldai_vars.attentions = att
     
     return genout
 
@@ -5366,6 +5394,7 @@ def oai_raw_generate(
     max_new: int,
     batch_count: int,
     gen_settings: GenerationSettings,
+    is_core: bool = False,
 ):
     # Taken mainly from oairequest()
 
@@ -5450,6 +5479,7 @@ def cluster_raw_generate(
     max_new: int,
     batch_count: int,
     gen_settings: GenerationSettings,
+    is_core: bool = False,
 ):
     decoded_prompt = utils.decodenewlines(tokenizer.decode(prompt_tokens))
 
@@ -5566,6 +5596,7 @@ def colab_raw_generate(
     max_new: int,
     batch_count: int,
     gen_settings: GenerationSettings,
+    is_core: bool = False,
 ):
     decoded_prompt = utils.decodenewlines(tokenizer.decode(prompt_tokens))
 
@@ -5613,6 +5644,7 @@ def api_raw_generate(
     max_new: int,
     batch_count: int,
     gen_settings: GenerationSettings,
+    is_core: bool = False,
 ):
     decoded_prompt = utils.decodenewlines(tokenizer.decode(prompt_tokens))
 
@@ -5662,6 +5694,7 @@ def rwkv_raw_generate(
     max_new: int,
     batch_count: int,
     gen_settings: GenerationSettings,
+    is_core: bool = False,
 ):
     import types
 

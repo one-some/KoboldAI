@@ -637,6 +637,8 @@ function var_changed(data) {
 	//Special case for context viewer
 	} else if (data.classname == "story" && data.name == "context") {
 		update_context(data.value);
+	} else if (data.classname == "story" && data.name == "attentions") {
+		update_attentions(data.value);
 	//special case for story_actionmode
 	} else if (data.classname == "story" && data.name == "actionmode") {
 		const button = document.getElementById('adventure_mode');
@@ -2876,6 +2878,14 @@ function distortColor(rgb) {
 	return rgb;
 }
 
+function selectToken(el) {
+	console.log(el);
+}
+
+function update_attentions(attentions) {
+	console.log(attentions);
+}
+
 function update_context(data) {
 	$(".context-block").remove();
 
@@ -2923,6 +2933,8 @@ function update_context(data) {
 			});
 
 			tokenEl.innerHTML = tokenEl.innerHTML.replaceAll("<br>", '<span class="material-icons-outlined context-symbol">keyboard_return</span>');
+
+			tokenEl.addEventListener("click", function() {selectToken(this)});
 		}
 		document.getElementById("context-container").appendChild(el);
 		

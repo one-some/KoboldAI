@@ -1166,6 +1166,7 @@ class user_settings(settings):
         self.cluster_requested_models = [] # The models which we allow to generate during cluster mode
         self.wigen_use_own_wi = False
         self.wigen_amount = 80
+        self.commentary_template = "\\n\\n<|>'s thoughts on what just happened in this story: \""
         
         
     def __setattr__(self, name, value):

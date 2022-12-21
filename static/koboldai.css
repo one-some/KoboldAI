@@ -817,6 +817,10 @@ border-top-right-radius: var(--tabs_rounding);
 	width: 100%;
 }
 
+.wide-boolean-setting.splitline {
+	display: block;
+}
+
 #Tweaks {
 	/* Don't add space under last tweak-container. Also, CSS, why no last-of-class!?!? */
 	margin-bottom: 0px;

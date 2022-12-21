@@ -10015,7 +10015,7 @@ def maybe_review_story(force_uid: Optional[int] = None) -> None:
         uid = int(uid)
         allowed_wi_uids.append(uid)
 
-    prompt = f"\n\n{speaker_name}'s thoughts on what just happened in this story: \""
+    prompt = koboldai_vars.commentary_template.replace("\\n", "\n").replace("<|>", speaker_name)
 
     context = koboldai_vars.calc_ai_text(
         prompt,
@@ -10023,7 +10023,6 @@ def maybe_review_story(force_uid: Optional[int] = None) -> None:
         send_context=False,
         allowed_wi_entries=allowed_wi_uids
     )
-
 
     out_text = tpool.execute(
         raw_generate,

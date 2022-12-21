@@ -9971,20 +9971,41 @@ def UI_2_refresh_auto_memory(data):
 #==================================================================#
 # Story review zero-shot
 #==================================================================#
-def maybe_review_story() -> None:
+@socketio.on("force_commentate")
+@logger.catch
+def UI_2_force_commentate(uid: int) -> None:
+    maybe_review_story(force_uid=uid)
+
+def maybe_review_story(force_uid: Optional[int] = None) -> None:
     commentary_characters = koboldai_vars.worldinfo_v2.get_commentators()
-    if not (
-        commentary_characters
-        and koboldai_vars.commentary_chance
-        and koboldai_vars.commentary_enabled
-    ):
-        return
 
-    if random.randrange(100) > koboldai_vars.commentary_chance:
-        return
+    if force_uid is None:
+        # Organic commentary
+        if not (
+            commentary_characters
+            and koboldai_vars.commentary_chance
+            and koboldai_vars.commentary_enabled
+        ):
+            return
 
-    char = random.choice(commentary_characters)
-    speaker_uid = char["uid"]
+        if random.randrange(100) > koboldai_vars.commentary_chance:
+            return
+    
+        char = random.choice(commentary_characters)
+        speaker_uid = char["uid"]
+    else:
+        # Forced commentary
+        speaker_uid = force_uid
+        char = None
+        for maybe_char in commentary_characters:
+            if maybe_char["uid"] == force_uid:
+                char = maybe_char
+                break
+        
+        if not char:
+            logger.error(f"Can't find commentary character for force_uid={force_uid}")
+            return None
+
     speaker_name = char["title"]
 
     allowed_wi_uids = [speaker_uid]

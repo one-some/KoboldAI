@@ -2009,6 +2009,7 @@ function world_info_entry(data) {
 		reader.readAsDataURL(file);
 	});
 
+	const commentateButton = world_info_card.querySelector(".wi-commentate-button");
 	const wiTypeSelector = world_info_card.querySelector(".world_info_type");
 
 	// We may want to change the display names of these later
@@ -2019,8 +2020,16 @@ function world_info_entry(data) {
 		commentator: "Commentator",
 	}[world_info_data[data.uid].type];
 
+	switch (wiTypeSelector.value) {
+		case "Commentator":
+			commentateButton.classList.remove("hidden");
+			break
+	}
+
 	wiTypeSelector.classList.remove("pulse");
 	wiTypeSelector.addEventListener("change", function(event) {
+		// This event only covers changes right before sync. Don't do cosmetic changes here.
+
 		// If no change, don't do anything. Don't loop!!!
 		if (world_info_data[data.uid].type === wiTypeSelector.value) {
 			return;
@@ -2051,7 +2060,14 @@ function world_info_entry(data) {
 		}[wiTypeSelector.value];
 		send_world_info(data.uid);
 		this.classList.add("pulse");
-	})
+	});
+
+	commentateButton.addEventListener("click", function() {
+		if (commentateButton.classList.contains("disabled")) return;
+		commentateButton.classList.add("disabled");
+		// TODO: Server events etc, template
+		socket.emit("force_commentate", data.uid);
+	});
 
 	tags = world_info_card.querySelector('.world_info_tag_primary_area');
 	tags.id = "world_info_tags_"+data.uid;
@@ -6802,6 +6818,9 @@ function imgGenRetry() {
 		$el("#story-review-content").innerText = data.review;
 		
 		$el("#story-review").classList.remove("hidden");
+		for (const commentateButton of document.querySelectorAll(".wi-commentate-button")) {
+			commentateButton.classList.remove("disabled");
+		}
 	}
 	socket.on("show_story_review", showStoryReview);
 

@@ -1177,6 +1177,16 @@ td.server_vars {
 
 .world_info_label_container > .generate-button:hover { opacity: 1.0; }
 
+.wi-commentate-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background-color: var(--button_background);
+	padding: 10px;
+	cursor: pointer;
+	border-radius: var(--radius_wi_card);
+}
+
 .tag {
 	background-color: var(--wi_tag_color);
 	color: var(--wi_tag_text_color);

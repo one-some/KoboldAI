@@ -2065,7 +2065,6 @@ function world_info_entry(data) {
 	commentateButton.addEventListener("click", function() {
 		if (commentateButton.classList.contains("disabled")) return;
 		commentateButton.classList.add("disabled");
-		// TODO: Server events etc, template
 		socket.emit("force_commentate", data.uid);
 	});
 

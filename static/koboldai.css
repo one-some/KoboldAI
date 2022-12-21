@@ -2887,7 +2887,11 @@ body {
 	padding: 10px;
 	background-color: var(--gamescreen_background);
 	margin: 10px 0px;
+	display: flex;
+	align-items: center;
 }
+
+#story-review-cont { flex-grow: 1; }
 
 #story-review-img {
 	width: 48px;
@@ -2900,6 +2904,11 @@ body {
 #story-review-author {
 	display: block;
 	font-weight: bold;
+}
+
+#story-review-x {
+	cursor: pointer;
+	opacity: 0.4;
 }
 
 #story-commentary-settings { width: 100%; }

@@ -6807,7 +6807,7 @@ function imgGenRetry() {
 })();
 
 (function() {
-	const characterContainer = $el(".story-commentary-characters");
+	const storyReview = $el("#story-review");
 	const settingsContainer = $el("#story-commentary-settings");
 	const storyReviewImg = $el("#story-review-img");
 
@@ -6817,7 +6817,7 @@ function imgGenRetry() {
 		$el("#story-review-author").innerText = data.who;
 		$el("#story-review-content").innerText = data.review;
 		
-		$el("#story-review").classList.remove("hidden");
+		storyReview.classList.remove("hidden");
 		for (const commentateButton of document.querySelectorAll(".wi-commentate-button")) {
 			commentateButton.classList.remove("disabled");
 		}
@@ -6853,7 +6853,9 @@ function imgGenRetry() {
 		storyReviewImg.src = "/static/default_pfp.png";
 	});
 
-	$el("#story-review-img").addEventListener
+	$el("#story-review-x").addEventListener("click", function() {
+		storyReview.classList.add("hidden");
+	});
 })();
 
 for (const el of document.querySelectorAll("[sync-var]")) {

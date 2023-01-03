@@ -493,6 +493,11 @@ function process_actions_data(data) {
 	clearTimeout(game_text_scroll_timeout);
 	game_text_scroll_timeout = setTimeout(run_infinite_scroll_update.bind(null, action_type, actions, first_action), 200);
 	clearTimeout(auto_loader_timeout);
+
+	let lastAction = actions_data[Math.max.apply(null, Object.keys(actions_data).map(Number))];
+	let lastProb = lastAction.Probabilities.slice(-1)[0];
+	console.info(lastProb);
+	// TODO: Confidence and show probs
 	
 	
 	hide_show_prompt();

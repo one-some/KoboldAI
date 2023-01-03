@@ -2306,12 +2306,14 @@ def patch_transformers():
                 option = koboldai_vars.actions.actions[koboldai_vars.actions.action_count+1]['Options'][x]
                 if option['Pinned'] or option["Previous Selection"] or option["Edited"]:
                     option_offset = x+1
+
         batch_offset = int((koboldai_vars.generated_tkns-1) / koboldai_vars.genamt) if koboldai_vars.alt_multi_gen else 0
         for batch_index, batch in enumerate(scores):
-            probs = F.softmax(batch, dim = -1).cpu().numpy()
-
+            top_probs = batch.softmax(-1).topk(8)
+            
             token_prob_info = []
-            for token_id, score in sorted(enumerate(probs), key=lambda x: x[1], reverse=True)[:8]:
+            for score_tensor, token_id_tensor in zip(*top_probs):
+                score, token_id = score_tensor.item(), token_id_tensor.item()
                 token_prob_info.append({
                     "tokenId": token_id,
                     "decoded": utils.decodenewlines(tokenizer.decode(token_id)),

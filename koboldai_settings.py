@@ -1493,16 +1493,55 @@ class KoboldStoryRegister(object):
         return {"action_count": self.action_count, "actions": self.actions}
         
     def load_json(self, json_data):
+        """Load the story from JSON, upgrading and migrating save attributes as needed.
+        
+        json_data: The story data, as either a dictionary or JSON-encoded string.
+        """
         if type(json_data) == str:
             import json
             json_data = json.loads(json_data)
+        
         self.action_count = int(json_data['action_count'])
         #JSON forces keys to be strings, so let's fix that
         temp = {}
         data_to_send = []
+
         for item in json_data['actions']:
+            # Add time if not present
             if "Time" not in json_data["actions"][item]:
                 json_data["actions"][item]["Time"] = int(time.time())
+
+            # Migrate Probabiltiies to Tokens if present
+
+            old_probs = json_data["actions"][item].get("Probabilities")
+            if old_probs:
+                print("migrating probabilties")
+                tokens = []
+                for token_probs in old_probs:
+                    t = {"chosen": None, "probabilities": []}
+                    for dat in token_probs:
+                        t["probabilities"].append({
+                            "value": dat["decoded"],
+                            "score": dat["score"],
+                            # TODO: tokenID shouldn't really be saved as it can
+                            # change betweeen tokenizers but with how
+                            # intertwined saving is with syncing I'm not sure
+                            # if it's currently possible to not save them.
+                            "tokenID": dat["tokenId"]
+                        })
+
+                        if dat.get("Used"):
+                            t["chosen"] = dat["decoded"]
+
+                    # Since there can be hundreds of thousands of tokens, it's
+                    # best we not waste file space with unused keys. We can
+                    # check for them later.
+                    if not t["chosen"]: del t["chosen"]
+                    if not t["probabilities"]: del t["probabilities"]
+
+                    tokens.append(t)
+                json_data["actions"][item]["Tokens"] = tokens
+                del json_data["actions"][item]["Probabilities"]
 
             temp[int(item)] = json_data['actions'][item]
             if int(item) >= self.action_count-100: #sending last 100 items to UI

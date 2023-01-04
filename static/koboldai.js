@@ -3672,6 +3672,17 @@ function update_bias_slider_value(slider) {
 	slider.parentElement.parentElement.querySelector(".bias_slider_cur").textContent = slider.value;
 }
 
+function CSSColor2RGB(cssColor) {
+	// Taking a string input of a valid CSS color, return an array 
+	const temp = $e("div", document.body, {
+		"style.display": "none",
+		"style.color": cssColor
+	});
+	const cssString = window.getComputedStyle(temp).color;
+	temp.remove();
+	return cssString.match(/[0-9]+/g).map(Number);
+}
+
 function distortColor(rgb) {
 	// rgb are 0..255, NOT NORMALIZED!!!!!!
 	const brightnessTamperAmplitude = 0.1;
@@ -6943,3 +6954,41 @@ $el(".gametext").addEventListener("keydown", function(event) {
 	document.execCommand("insertLineBreak");
 	event.preventDefault();
 });
+
+/* Probabilities / Confidence viewer */
+
+function showProbabilityViewer(actionId, tokenIndex) {
+	const viewer = $el("#prob-viewer");
+	viewer.innerHTML = "";
+
+	const upperRGB = CSSColor2RGB(getComputedStyle(document.body).getPropertyValue("--probability-high"));
+
+	const probData = [
+		{decoded: "why", probability: 50.42},
+		{decoded: "was", probability: 32.08},
+		{decoded: "six", probability: 22.07},
+		{decoded: "afraid", probability: 10.04},
+		{decoded: "of", probability: 3.05},
+		{decoded: "seven", probability: 2.07},
+		{decoded: "because", probability: 1.07},
+		{decoded: "seven", probability: 0.83}
+	];
+
+	for (const maybe of probData) {
+		// token-value is set as an attribute because yanking the value from
+		// innerText leaves it subject to whatever formatting the browser does
+		// on the text (stripping, etc)
+		const altTokenEl = $e("div", viewer, {classes: ["alternate-token"], "token-value": maybe.decoded});
+		const decodedEl = $e("span", altTokenEl, {innerText: maybe.decoded, classes: ["token-value"]});
+		const probEl = $e("span", altTokenEl, {innerText: maybe.probability, classes: ["token-probability"]});
+
+		const alpha = (maybe.probability / 100) + 0.1;
+		altTokenEl.style.backgroundColor = `rgba(${upperRGB.join(', ')}, ${alpha})`;
+
+		altTokenEl.addEventListener("click", function() {
+			console.log(this, "hehehehehehhrehdfhdhrffghdfhfhfrhrhruryhr");
+		});
+	}
+}
+
+showProbabilityViewer();

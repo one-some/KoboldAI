@@ -174,10 +174,8 @@
 	--radius_settings_button: 2px;
 	--tabs_rounding: 2px;
 
-
-
-
-
+	/* Etc */
+	--probability-high: #2c4e74;
 
 /*----------------VARIABLES--------------------*/
 	--flyout_menu_closed_width: 0px;

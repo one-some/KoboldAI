@@ -1220,6 +1220,27 @@ td.server_vars {
 	margin-right: 5px;
 }
 
+/* Probability picker / confidence */
+#prob-viewer {
+	position: absolute;
+	left: 500px;
+	top: 500px;
+	background-color: var(--flyout_background);
+	border: 2px solid var(--background);
+	padding: 5px 5px;
+}
+
+#prob-viewer > .alternate-token {
+	font-family: monospace;
+	display: flex;
+	justify-content: space-between;
+	cursor: pointer;
+	padding: 0px 5px;
+}
+
+#prob-viewer > .alternate-token > .token-value {
+	margin-right: 25px;
+}
 
 /* ---------------------------- OVERALL PAGE CONFIG ------------------------------*/
 body {

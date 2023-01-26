@@ -2922,6 +2922,7 @@ def load_model(use_gpu=True, gpu_layers=None, disk_layers=None, initial_load=Fal
                 gpu_blocks = breakmodel.gpu_blocks
                 ram_blocks = ram_blocks = n_layers - sum(gpu_blocks)
                 cumulative_gpu_blocks = tuple(itertools.accumulate(gpu_blocks))
+                import bitsandbytes
 
                 def lazy_load_callback(model_dict: Dict[str, Union[torch_lazy_loader.LazyTensor, torch.Tensor]], f, **_):
                     if lazy_load_callback.nested:
@@ -2992,26 +2993,56 @@ def load_model(use_gpu=True, gpu_layers=None, disk_layers=None, initial_load=Fal
                                 size = functools.reduce(lambda x, y: x * y, model_dict[key].shape, 1)
                                 dtype = model_dict[key].dtype
                                 nbytes = size if dtype is torch.bool else size * ((torch.finfo if dtype.is_floating_point else torch.iinfo)(dtype).bits >> 3)
-                                #print(f"Transferring <{key}>  to  {f'({device.upper()})' if isinstance(device, str) else '[device ' + str(device) + ']'} ... ", end="", flush=True)
-                                model_dict[key] = model_dict[key].materialize(f, map_location="cpu")
-                                if model_dict[key].dtype is torch.float32:
-                                    koboldai_vars.fp32_model = True
-                                if convert_to_float16 and breakmodel.primary_device != "cpu" and koboldai_vars.hascuda and (koboldai_vars.breakmodel or koboldai_vars.usegpu) and model_dict[key].dtype is torch.float32:
-                                    model_dict[key] = model_dict[key].to(torch.float16)
-                                if breakmodel.primary_device == "cpu" or (not koboldai_vars.usegpu and not koboldai_vars.breakmodel and model_dict[key].dtype is torch.float16):
-                                    model_dict[key] = model_dict[key].to(torch.float32)
-                                if device == "shared":
-                                    model_dict[key] = model_dict[key].to("cpu").detach_()
-                                    if able_to_pin_layers and utils.HAS_ACCELERATE:
-                                        try:
-                                            model_dict[key] = model_dict[key].pin_memory()
-                                        except:
-                                            able_to_pin_layers = False
-                                elif device == "disk":
-                                    accelerate.utils.offload_weight(model_dict[key], get_original_key(key), "accelerate-disk-cache", index=utils.offload_index)
-                                    model_dict[key] = model_dict[key].to("meta")
+                                print(f"Transferring <{key}>  to  {f'({device.upper()})' if isinstance(device, str) else '[device ' + str(device) + ']'} ... ", end="", flush=True)
+
+                                print(f"DEVICE: {device}, model: {model}")
+                                print(f"{key} -- {model_dict[key]}")
+                                
+                                USE_8BIT = True
+
+                                if USE_8BIT:
+                                    print("8-BIT "*10)
+                                    tensor = model_dict[key].materialize(f, map_location="cpu")
+                                    # print(tensor.dtype, tensor)
+                                    
+                                    if device == "shared":
+                                        # model_dict[key] = model_dict[key].to("cpu").detach_()
+                                        if able_to_pin_layers and utils.HAS_ACCELERATE:
+                                            print("HEHE")
+                                            try:
+                                                # model_dict[key] = model_dict[key].pin_memory()
+                                                model_dict[key] = model_dict[key].pin_memory()
+                                            except:
+                                                able_to_pin_layers = False
+                                    else:
+                                        model_dict[key] = bitsandbytes.nn.Int8Params(
+                                            tensor,
+                                            # tensor,
+                                            requires_grad=False,
+                                            has_fp16_weights=True,
+                                        )
+                                        model_dict[key] = model_dict[key].to(device)
                                 else:
-                                    model_dict[key] = model_dict[key].to(device)
+                                    model_dict[key] = model_dict[key].materialize(f, map_location="cpu")
+
+                                    if model_dict[key].dtype is torch.float32:
+                                        koboldai_vars.fp32_model = True
+                                    if convert_to_float16 and breakmodel.primary_device != "cpu" and koboldai_vars.hascuda and (koboldai_vars.breakmodel or koboldai_vars.usegpu) and model_dict[key].dtype is torch.float32:
+                                        model_dict[key] = model_dict[key].to(torch.float16)
+                                    if breakmodel.primary_device == "cpu" or (not koboldai_vars.usegpu and not koboldai_vars.breakmodel and model_dict[key].dtype is torch.float16):
+                                        model_dict[key] = model_dict[key].to(torch.float32)
+                                    if device == "shared":
+                                        model_dict[key] = model_dict[key].to("cpu").detach_()
+                                        if able_to_pin_layers and utils.HAS_ACCELERATE:
+                                            try:
+                                                model_dict[key] = model_dict[key].pin_memory()
+                                            except:
+                                                able_to_pin_layers = False
+                                    elif device == "disk":
+                                        accelerate.utils.offload_weight(model_dict[key], get_original_key(key), "accelerate-disk-cache", index=utils.offload_index)
+                                        model_dict[key] = model_dict[key].to("meta")
+                                    else:
+                                        model_dict[key] = model_dict[key].to(device)
                                 #print("OK", flush=True)
                                 current_offset += nbytes
                                 utils.bar.update(1)
@@ -5446,6 +5477,9 @@ def calcsubmit(txt):
         ikrequest(subtxt)
 
 def core_generate(text: list, _min: int, _max: int, found_entries: set, is_core: bool = False):
+    for name, module in model.named_children():
+        print(f"{name} - {module}")
+
     # This generation function is tangled with koboldai_vars intentionally. It
     # is meant for the story and nothing else.
 

@@ -1141,19 +1141,27 @@ def load_model(path: str, driver_version="tpu_driver0.1_dev20210607", hf_checkpo
         }
 
     # Try to convert HF config.json to MTJ config
+    print(-1, path, hf_checkpoint)
     if hf_checkpoint:
+        print("hfcheckpoint")
         spec_path = os.path.join("maps", koboldai_vars.model_type + ".json")
         if not os.path.isfile(spec_path):
             raise NotImplementedError(f"Unsupported model type {repr(koboldai_vars.model_type)}")
         with open(spec_path) as f:
             lazy_load_spec = json.load(f)
+        
+        print(1, params)
+        print(2, spec_path)
+        print(3, lazy_load_spec)
 
         if "mtj_compat" in lazy_load_spec:
             params["compat"] = lazy_load_spec["mtj_compat"]
         if "mtj_pe" in lazy_load_spec:
             params["pe"] = lazy_load_spec["mtj_pe"]
+
         for k, v in lazy_load_spec.get("mtj_config_map", {}).items():
             if type(v) is not list:
+                print(f"params[{k}] = params[{v}]")
                 params[k] = params[v]
                 continue
             for i in range(len(v)):

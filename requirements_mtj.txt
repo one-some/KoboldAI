@@ -3,7 +3,7 @@ numpy
 tqdm
 requests
 dm-haiku == 0.0.5
-jax == 0.4.2
+jax == 0.4.6
 jaxlib == 0.4.1
 transformers == 4.25.1
 huggingface_hub==0.12.1

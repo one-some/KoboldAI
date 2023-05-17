@@ -52,6 +52,17 @@ except ModuleNotFoundError as e:
 LOG_SAMPLER_NO_EFFECT = False
 
 
+# HACK: Ugly hack to revert the changes made in https://github.com/huggingface/transformers/pull/23147.
+# Making these buffers non-persistent makes accelerate think keys are missing
+# and it throws errors.
+_old_regbuf = torch.nn.Module.register_buffer
+def _regbuf_patch(self, *args, **kwargs):
+    if isinstance(self, transformers.models.gptj.modeling_gptj.GPTJAttention):
+        kwargs["persistent"] = True
+    return _old_regbuf(self, *args, **kwargs)
+torch.nn.Module.register_buffer = _regbuf_patch
+
+
 class HFTorchInferenceModel(HFInferenceModel):
     def __init__(
         self,

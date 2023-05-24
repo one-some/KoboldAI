@@ -17,7 +17,7 @@ from modeling.inference_model import (
     ModelCapabilities,
 )
 from modeling.inference_models.hf import HFInferenceModel
-from modeling.tokenizer import GenericTokenizer
+from modeling.tokenizer import HFGenericTokenizer
 
 # This file shouldn't be imported unless using the TPU
 assert utils.koboldai_vars.use_colab_tpu
@@ -194,7 +194,7 @@ class HFMTJInferenceModel(HFInferenceModel):
         utils.koboldai_vars.modeldim = int(
             tpu_mtj_backend.params.get("d_embed", tpu_mtj_backend.params["d_model"])
         )
-        self.tokenizer = GenericTokenizer(tpu_mtj_backend.tokenizer)
+        self.tokenizer = HFGenericTokenizer(tpu_mtj_backend.tokenizer)
 
         if (
             utils.koboldai_vars.badwordsids is koboldai_settings.badwordsids_default

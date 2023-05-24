@@ -12,7 +12,7 @@ from transformers import (
     GPT2Tokenizer,
     AutoTokenizer,
 )
-from modeling.tokenizer import GenericTokenizer
+from modeling.tokenizer import GenericTokenizer, HFGenericTokenizer
 from modeling import logits_processors
 
 import utils
@@ -216,7 +216,7 @@ class InferenceModel:
 
         for i, try_get_tokenizer in enumerate(suppliers):
             try:
-                return GenericTokenizer(try_get_tokenizer())
+                return HFGenericTokenizer(try_get_tokenizer())
             except Exception as e:
                 logger.warning(f"Tokenizer falling back due to {e} (This can be normal behavior for some architectures that lack a slow tokenizer such as NeoX)")
                 # If we error on each attempt, raise the last one

@@ -1923,6 +1923,12 @@ def load_model(use_gpu=True, gpu_layers=None, disk_layers=None, initial_load=Fal
     # TODO: InferKit
     if koboldai_vars.model == "ReadOnly" or koboldai_vars.noai:
         pass
+    elif koboldai_vars.model == "llamacpp":
+        from modeling.inference_models.llama_cpp import LlamaCppInferenceModel
+        model = LlamaCppInferenceModel()
+        print('h')
+        model.load(initial_load=initial_load)
+        print('z')
     elif koboldai_vars.model in ["Colab", "API", "CLUSTER", "OAI"]:
         koboldai_vars.colaburl = url or koboldai_vars.colaburl
         koboldai_vars.usegpu = False
@@ -1963,7 +1969,6 @@ def load_model(use_gpu=True, gpu_layers=None, disk_layers=None, initial_load=Fal
             save_model=not (args.colab or args.cacheonly) or args.savemodel,
             initial_load=initial_load,
         )
-        logger.info(f"Pipeline created: {koboldai_vars.model}")
     else:
         # TPU
         from modeling.inference_models.hf_mtj import HFMTJInferenceModel
@@ -1974,9 +1979,11 @@ def load_model(use_gpu=True, gpu_layers=None, disk_layers=None, initial_load=Fal
             save_model=not (args.colab or args.cacheonly) or args.savemodel,
             initial_load=initial_load,
         )
+    logger.info(f"Pipeline created: {koboldai_vars.model}")
     
     # TODO: Convert everywhere to use model.tokenizer
     if model:
+        print("hi")
         tokenizer = model.tokenizer
 
     loadmodelsettings()
@@ -1986,11 +1993,16 @@ def load_model(use_gpu=True, gpu_layers=None, disk_layers=None, initial_load=Fal
     # Load scripts
     load_lua_scripts()
     
+    print("FINALCOUNTDO")
     final_startup()
+    print("FINALCOUNTDO 1")
     #if not initial_load:
     set_aibusy(False)
+    print("FINALCOUNTDO 2")
     socketio.emit('from_server', {'cmd': 'hide_model_name'}, broadcast=True, room="UI_1")
+    print("FINALCOUNTDO 3")
     time.sleep(0.1)
+    print("FINALCOUNTDO 4")
         
     if not koboldai_vars.gamestarted:
         setStartState()
@@ -5650,10 +5662,14 @@ def randomGameRequest(topic, memory=""):
 def final_startup():
     # Prevent tokenizer from taking extra time the first time it's used
     def __preempt_tokenizer():
+        print("WHAT")
         if("tokenizer" not in globals()):
+            print("Bye")
             return
         utils.decodenewlines(tokenizer.decode([25678, 559]))
+        print("e")
         tokenizer.encode(utils.encodenewlines("eunoia"))
+        print("e1")
     tpool.execute(__preempt_tokenizer)
 
     # Load soft prompt specified by the settings file, if applicable

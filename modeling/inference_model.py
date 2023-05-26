@@ -170,13 +170,13 @@ class InferenceModel:
         self.tokenizer = None
         self.capabilties = ModelCapabilities()
         self.model_name = "Not Defined"
-    
+
     def is_valid(self, model_name, model_path, menu_path, vram):
         return True
-        
+
     def requested_parameters(self, model_name, model_path, menu_path, vram):
         return {}
-        
+
     def set_input_parameters(self, parameters):
         for parameter in parameters:
             setattr(self, parameter, parameters[parameter])
@@ -198,7 +198,7 @@ class InferenceModel:
 
     def _post_load(self) -> None:
         """Post load hook. Called after `_load()`."""
-    
+
     def _save_settings(self) -> None:
         """Save settings hook. Called after `_post_load()`."""
 
@@ -237,7 +237,9 @@ class InferenceModel:
             try:
                 return GenericTokenizer(try_get_tokenizer())
             except Exception as e:
-                logger.warning(f"Tokenizer falling back due to {e} (This can be normal behavior for some architectures that lack a slow tokenizer such as NeoX)")
+                logger.warning(
+                    f"Tokenizer falling back due to {e} (This can be normal behavior for some architectures that lack a slow tokenizer such as NeoX)"
+                )
                 # If we error on each attempt, raise the last one
                 if i == len(suppliers) - 1:
                     raise

@@ -1,126 +1,114 @@
-import os
-import json
-from typing import Optional
-from dataclasses import dataclass
+from typing import Union
+from logger import logger
 
-import koboldai_settings
-from server.formatting import kml
 from server.kaivars import koboldai_vars
-from modeling.inference_model import InferenceModel
+from server.socket import ui1_command, ui1_error
+from server.state import set_gamesaved, ui1_send_debug
 
 
-@dataclass
-class Setting:
-    name: str
-    kai_vars_name: Optional[str] = None
-    alter_default_preset: Optional[bool] = False
+def inline_edit(chunk: int, data: str) -> None:
+    koboldai_vars.recentedit = True
+    chunk = int(chunk)
+    if chunk == 0:
+        if len(data.strip()) == 0:
+            return
+        koboldai_vars.prompt = data
+    else:
+        if chunk - 1 in koboldai_vars.actions:
+            koboldai_vars.actions[chunk - 1] = data
+        else:
+            logger.warning(f"Attempted to edit non-existent chunk {chunk}")
+
+    set_gamesaved(False)
+    update_story_chunk(chunk)
+    ui1_command("texteffect", chunk)
+    ui1_command("editmode", "false")
+    ui1_send_debug()
+
+
+def inline_delete(chunk: int) -> None:
+    koboldai_vars.recentedit = True
+    chunk = int(chunk)
+    # Don't delete prompt
+    if chunk == 0:
+        # Send error message
+        update_story_chunk(chunk)
+
+        ui1_error("Cannot delete the prompt.")
+        ui1_command("editmode", "false")
+    else:
+        if chunk - 1 in koboldai_vars.actions:
+            koboldai_vars.actions.delete_action(chunk - 1)
+        else:
+            logger.warning(f"Attempted to delete non-existent chunk {chunk}")
+        set_gamesaved(False)
+        remove_story_chunk(chunk)
+        ui1_command("editmode", "false")
+    ui1_send_debug()
+
+
+def update_story_chunk(idx: Union[int, str]):
+    """Signals the Game Screen to update one of the chunks"""
+    if idx == "last":
+        if len(koboldai_vars.actions) <= 1:
+            # In this case, we are better off just refreshing the whole thing as the
+            # prompt might not have been shown yet (with a "Generating story..."
+            # message instead).
+            refresh_story()
+            set_gamesaved(False)
+            return
+
+        idx = (
+            koboldai_vars.actions.get_last_key() if len(koboldai_vars.actions) else 0
+        ) + 1
+
+    if idx == 0:
+        text = koboldai_vars.prompt
+    else:
+        # Actions are 0 based, but in chunks 0 is the prompt.
+        # So the chunk index is one more than the corresponding action index.
+        if idx - 1 not in koboldai_vars.actions:
+            return
+        text = koboldai_vars.actions[idx - 1]
+
+    item = html.escape(text)
+    item = koboldai_vars.comregex_ui.sub(
+        lambda m: "\n".join(
+            "<comment>" + l + "</comment>" for l in m.group().split("\n")
+        ),
+        item,
+    )  # Add special formatting to comments
+    item = koboldai_vars.acregex_ui.sub(
+        "<action>\\1</action>", item
+    )  # Add special formatting to adventure actions
+
+    chunk_text = (
+        f'<chunk n="{idx}" id="n{idx}" tabindex="-1">{formatforhtml(item)}</chunk>'
+    )
+    emit(
+        "from_server",
+        {"cmd": "updatechunk", "data": {"index": idx, "html": chunk_text}},
+        broadcast=True,
+        room="UI_1",
+    )
+
+    set_gamesaved(False)
 
 
 # ==================================================================#
+# Signals the Game Screen to remove one of the chunks
 # ==================================================================#
+def remove_story_chunk(idx: int):
+    emit(
+        "from_server", {"cmd": "removechunk", "data": idx}, broadcast=True, room="UI_1"
+    )
+    set_gamesaved(False)
 
 
-def load_settings(model_name: str) -> None:
-    """Read settings from client file JSON and send to koboldai_vars"""
-
-    path = "settings/" + model_name.replace("/", "_") + ".v2_settings"
-    if not os.path.exists(path):
-        return
-
-    with open(path, "r") as file:
-        koboldai_vars._model_settings.from_json(file.read())
-
-
-def load_model_settings(model: InferenceModel):
-    """Allow the models to override some settings"""
-
-    model.model_config
-
-    config = {}
-
-    try:
-        config = model.config
-    except AttributeError:
-        for model_dir in [
-            koboldai_vars.custmodpth,
-            koboldai_vars.custmodpth.replace("/", "_"),
-        ]:
-            try:
-                with open(os.path.join(model_dir, "config.json"), "r") as file:
-                    config = json.load(file)
-            except FileNotFoundError:
-                pass
-
-    koboldai_vars.default_preset = koboldai_settings.default_preset
-
-    if koboldai_vars.model_type == "xglm" or config.get("compat", "j") == "fairseq_lm":
-        koboldai_vars.newlinemode = "s"  # Default to </s> newline mode if using XGLM
-    if koboldai_vars.model_type == "opt" or koboldai_vars.model_type == "bloom":
-        koboldai_vars.newlinemode = "ns"  # Handle </s> but don't convert newlines if using Fairseq models that have newlines trained in them
-
-    koboldai_vars.modelconfig = config
-
-    # Simple settings
-    for setting in [
-        Setting("badwordsids"),
-        Setting("nobreakmodel"),
-        Setting("temp", alter_default_preset=True),
-        Setting("top_p", alter_default_preset=True),
-        Setting("top_k", alter_default_preset=True),
-        Setting("tfs", alter_default_preset=True),
-        Setting("typical", alter_default_preset=True),
-        Setting("top_a", alter_default_preset=True),
-        Setting("rep_pen", alter_default_preset=True),
-        Setting("rep_pen_slope", alter_default_preset=True),
-        Setting("rep_pen_range", alter_default_preset=True),
-        Setting("adventure"),
-        Setting("chatmode"),
-        Setting("dynamicscan"),
-        Setting("newlinemode"),
-    ]:
-        setattr(
-            koboldai_vars, setting.kai_vars_name or setting.name, config[setting.name]
-        )
-        if setting.alter_default_preset:
-            koboldai_vars.default_preset[setting.name] = config[setting.name]
-
-    # More complicated settings have their own logic
-
-    if "sampler_order" in config:
-        sampler_order = config["sampler_order"]
-        if len(sampler_order) < 7:
-            sampler_order = [6] + sampler_order
-        koboldai_vars.sampler_order = sampler_order
-
-    if "formatoptns" in config:
-        for setting in [
-            "frmttriminc",
-            "frmtrmblln",
-            "frmtrmspch",
-            "frmtadsnsp",
-            "singleline",
-        ]:
-            if setting in config["formatoptns"]:
-                setattr(koboldai_vars, setting, config["formatoptns"][setting])
-
-    if "welcome" in config:
-        koboldai_vars.welcome = (
-            kml(config["welcome"])
-            if config["welcome"] != False
-            else koboldai_vars.welcome_default
-        )
-
-    if "newlinemode" in config:
-        koboldai_vars.newlinemode = config["newlinemode"]
-
-    if "antemplate" in config:
-        koboldai_vars.setauthornotetemplate = config["antemplate"]
-        if not koboldai_vars.gamestarted:
-            koboldai_vars.authornotetemplate = koboldai_vars.setauthornotetemplate
-
-
-def ui1_refresh_settings() -> None:
-    """Sends the current generator settings to the Game Menu"""
+# ==================================================================#
+# Sends the current generator settings to the Game Menu
+# ==================================================================#
+def refresh_settings():
     # Suppress toggle change events while loading state
     socketio.emit(
         "from_server",
@@ -354,3 +342,60 @@ def ui1_refresh_settings() -> None:
     socketio.emit(
         "from_server", {"cmd": "allowtoggle", "data": True}, broadcast=True, room="UI_1"
     )
+
+
+# ==================================================================#
+#
+# ==================================================================#
+def editrequest(n):
+    if n == 0:
+        txt = koboldai_vars.prompt
+    else:
+        txt = koboldai_vars.actions[n - 1]
+
+    koboldai_vars.editln = n
+    emit(
+        "from_server", {"cmd": "setinputtext", "data": txt}, broadcast=True, room="UI_1"
+    )
+    emit(
+        "from_server", {"cmd": "enablesubmit", "data": ""}, broadcast=True, room="UI_1"
+    )
+
+
+# ==================================================================#
+#
+# ==================================================================#
+def editsubmit(data):
+    koboldai_vars.recentedit = True
+    if koboldai_vars.editln == 0:
+        koboldai_vars.prompt = data
+    else:
+        koboldai_vars.actions[koboldai_vars.editln - 1] = data
+
+    koboldai_vars.mode = "play"
+    update_story_chunk(koboldai_vars.editln)
+    emit(
+        "from_server",
+        {"cmd": "texteffect", "data": koboldai_vars.editln},
+        broadcast=True,
+        room="UI_1",
+    )
+    emit("from_server", {"cmd": "editmode", "data": "false"}, room="UI_1")
+    ui1_send_debug()
+
+
+# ==================================================================#
+#
+# ==================================================================#
+def deleterequest():
+    koboldai_vars.recentedit = True
+    # Don't delete prompt
+    if koboldai_vars.editln == 0:
+        # Send error message
+        pass
+    else:
+        koboldai_vars.actions.delete_action(koboldai_vars.editln - 1)
+        koboldai_vars.mode = "play"
+        remove_story_chunk(koboldai_vars.editln)
+        emit("from_server", {"cmd": "editmode", "data": "false"}, room="UI_1")
+    ui1_send_debug()

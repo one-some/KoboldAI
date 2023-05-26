@@ -10,7 +10,8 @@ from logger import logger
 from modeling.inference_model import InferenceModel
 
 from server.kaivars import koboldai_vars
-from server.settings import load_model_settings
+from server.lua import lua_startup
+from server.settings import load_model_settings, load_settings
 from server.socket import SLEEP_HACK, command, ui1_command
 from server.state import set_aibusy
 
@@ -167,9 +168,9 @@ def load_model(model_backend: str, initial_load: bool = False) -> InferenceModel
         tokenizer = model.tokenizer
 
     load_model_settings(model)
-    loadsettings()
+    load_settings(model.model_name)
 
-    lua_startup()
+    lua_startup(model)
     # Load scripts
     load_lua_scripts()
 

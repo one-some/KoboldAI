@@ -43,3 +43,16 @@ def kml(txt: str) -> str:
         attributes=["id", "class", "style", "href"],
     )
     return txt
+
+
+def format_for_html(txt: str) -> str:
+    """Replaces returns and newlines with HTML breaks"""
+    return (
+        txt.replace("\\r\\n", "<br/>")
+        .replace("\\r", "<br/>")
+        .replace("\\n", "<br/>")
+        .replace("\r\n", "<br/>")
+        .replace("\n", "<br/>")
+        .replace("\r", "<br/>")
+        .replace("&lt;/s&gt;", "<br/>")
+    )

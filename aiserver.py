@@ -9,8 +9,8 @@
 = THINGS TO WORRY ABOUT =
 - If anything works at all
 - Setting serialization
-
-
+- Being a little less lousy with type annotations on non-ui1 stuff. ui1 stuff
+  is kinda whatever since it'll be removed at some point anyway
 """
 
 # External packages
@@ -23,7 +23,7 @@ import eventlet
 from server.formatting import apply_input_formatting
 from server.model import set_should_save_model
 from server.softprompt import load_softprompt
-from server.state import set_aibusy, ui1_toggle_memory_mode
+from server.state import set_aibusy, ui1_toggle_memory_mode, ui1_send_debug
 
 eventlet.monkey_patch(all=True, thread=False, os=False)
 import os, inspect
@@ -35,7 +35,7 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 from eventlet import tpool
 
 import logging
-from logger import logger, set_logger_verbosity, quiesce_logger
+from logger import logger, set_logger_verbosity, quiesce_logger, Colors
 from ansi2html import Ansi2HTMLConverter
 
 logging.getLogger("urllib3").setLevel(logging.ERROR)
@@ -132,17 +132,6 @@ def is_model_downloaded(model_name: str) -> bool:
 #==================================================================#
 # Variables & Storage
 #==================================================================#
-
-# Terminal tags for colored text
-class colors:
-    PURPLE    = '\033[95m'
-    BLUE      = '\033[94m'
-    CYAN      = '\033[96m'
-    GREEN     = '\033[92m'
-    YELLOW    = '\033[93m'
-    RED       = '\033[91m'
-    END       = '\033[0m'
-    UNDERLINE = '\033[4m'
 
 class MenuModelType(Enum):
     HUGGINGFACE = 0
@@ -845,7 +834,7 @@ def getModelSelection(modellist):
         if(modelsel.isnumeric() and int(modelsel) > 0 and int(modelsel) <= len(modellist)):
             koboldai_vars.model = modellist[int(modelsel)-1][1]
         else:
-            print("{0}Please enter a valid selection.{1}".format(colors.RED, colors.END))
+            print("{0}Please enter a valid selection.{1}".format(Colors.RED, Colors.END))
     
     # Model Lists
     try:
@@ -856,7 +845,7 @@ def getModelSelection(modellist):
                 
         # If custom model was selected, get the filesystem location and store it
         if(koboldai_vars.model == "NeoCustom" or koboldai_vars.model == "GPT2Custom"):
-            print("{0}Please choose the folder where pytorch_model.bin is located:{1}\n".format(colors.CYAN, colors.END))
+            print("{0}Please choose the folder where pytorch_model.bin is located:{1}\n".format(Colors.CYAN, Colors.END))
             modpath = fileops.getdirpath(getcwd() + "/models", "Select Model Folder")
         
             if(modpath):
@@ -864,8 +853,8 @@ def getModelSelection(modellist):
                 koboldai_vars.custmodpth = modpath
             else:
                 # Print error and retry model selection
-                print("{0}Model select cancelled!{1}".format(colors.RED, colors.END))
-                print("{0}Select an AI model to continue:{1}\n".format(colors.CYAN, colors.END))
+                print("{0}Model select cancelled!{1}".format(Colors.RED, Colors.END))
+                print("{0}Select an AI model to continue:{1}\n".format(Colors.CYAN, Colors.END))
                 getModelSelection(mainmenu)
 
 def check_if_dir_is_model(path):
@@ -882,109 +871,12 @@ def check_if_dir_is_model(path):
 #    return keys
 
 #==================================================================#
-# Return Model Name
-#==================================================================#
-def getmodelname():
-    if(koboldai_vars.online_model != ''):
-        return(f"{koboldai_vars.model}/{koboldai_vars.online_model}")
-    if(koboldai_vars.model in ("NeoCustom", "GPT2Custom", "TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX")):
-        modelname = os.path.basename(os.path.normpath(koboldai_vars.custmodpth))
-        return modelname
-    else:
-        modelname = koboldai_vars.model if koboldai_vars.model is not None else "Read Only"
-        return modelname
-
-#==================================================================#
 # Get hidden size from model
 #==================================================================#
 def get_hidden_size_from_model(model):
     return model.get_input_embeddings().embedding_dim
 
 
-
-#==================================================================#
-#  Allow the models to override some settings
-#==================================================================#
-def loadmodelsettings():
-    try:
-        js   = json.loads(str(model.model_config).partition(' ')[2])
-    except Exception as e:
-        try:
-            try:
-                js   = json.load(open(koboldai_vars.custmodpth + "/config.json", "r"))
-            except Exception as e:
-                js   = json.load(open(koboldai_vars.custmodpth.replace('/', '_') + "/config.json", "r"))            
-        except Exception as e:
-            js   = {}
-    koboldai_vars.default_preset = koboldai_settings.default_preset
-    if koboldai_vars.model_type == "xglm" or js.get("compat", "j") == "fairseq_lm":
-        koboldai_vars.newlinemode = "s"  # Default to </s> newline mode if using XGLM
-    if koboldai_vars.model_type == "opt" or koboldai_vars.model_type == "bloom":
-        koboldai_vars.newlinemode = "ns"  # Handle </s> but don't convert newlines if using Fairseq models that have newlines trained in them
-    koboldai_vars.modelconfig = js
-    if("badwordsids" in js):
-        koboldai_vars.badwordsids = js["badwordsids"]
-    if("nobreakmodel" in js):
-        koboldai_vars.nobreakmodel = js["nobreakmodel"]
-    if("sampler_order" in js):
-        sampler_order = js["sampler_order"]
-        if(len(sampler_order) < 7):
-            sampler_order = [6] + sampler_order
-        koboldai_vars.sampler_order = sampler_order
-    if("temp" in js):
-        koboldai_vars.temp       = js["temp"]
-        koboldai_vars.default_preset['temp'] = js["temp"]
-    if("top_p" in js):
-        koboldai_vars.top_p      = js["top_p"]
-        koboldai_vars.default_preset['top_p'] = js["top_p"]
-    if("top_k" in js):
-        koboldai_vars.top_k      = js["top_k"]
-        koboldai_vars.default_preset['top_k'] = js["top_k"]
-    if("tfs" in js):
-        koboldai_vars.tfs        = js["tfs"]
-        koboldai_vars.default_preset['tfs'] = js["tfs"]
-    if("typical" in js):
-        koboldai_vars.typical    = js["typical"]
-        koboldai_vars.default_preset['typical'] = js["typical"]
-    if("top_a" in js):
-        koboldai_vars.top_a      = js["top_a"]
-        koboldai_vars.default_preset['top_a'] = js["top_a"]
-    if("rep_pen" in js):
-        koboldai_vars.rep_pen    = js["rep_pen"]
-        koboldai_vars.default_preset['rep_pen'] = js["rep_pen"]
-    if("rep_pen_slope" in js):
-        koboldai_vars.rep_pen_slope = js["rep_pen_slope"]
-        koboldai_vars.default_preset['rep_pen_slope'] = js["rep_pen_slope"]
-    if("rep_pen_range" in js):
-        koboldai_vars.rep_pen_range = js["rep_pen_range"]
-        koboldai_vars.default_preset['rep_pen_range'] = js["rep_pen_range"]
-    if("adventure" in js):
-        koboldai_vars.adventure = js["adventure"]
-    if("chatmode" in js):
-        koboldai_vars.chatmode = js["chatmode"]
-    if("dynamicscan" in js):
-        koboldai_vars.dynamicscan = js["dynamicscan"]
-    if("formatoptns" in js):
-        for setting in ['frmttriminc', 'frmtrmblln', 'frmtrmspch', 'frmtadsnsp', 'singleline']:
-            if setting in js["formatoptns"]:
-                setattr(koboldai_vars, setting, js["formatoptns"][setting])
-    if("welcome" in js):
-        koboldai_vars.welcome = kml(js["welcome"]) if js["welcome"] != False else koboldai_vars.welcome_default
-    if("newlinemode" in js):
-        koboldai_vars.newlinemode = js["newlinemode"]
-    if("antemplate" in js):
-        koboldai_vars.setauthornotetemplate = js["antemplate"]
-        if(not koboldai_vars.gamestarted):
-            koboldai_vars.authornotetemplate = koboldai_vars.setauthornotetemplate
-
-#==================================================================#
-#  Read settings from client file JSON and send to koboldai_vars
-#==================================================================#
-
-def loadsettings():
-    if(path.exists("settings/" + getmodelname().replace('/', '_') + ".v2_settings")):
-        with open("settings/" + getmodelname().replace('/', '_') + ".v2_settings", "r") as file:
-            getattr(koboldai_vars, "_model_settings").from_json(file.read())
 
 #==================================================================#
 # Startup
@@ -1191,7 +1083,7 @@ def general_startup(override_args=None):
     
     #Now let's look to see if we are going to force a load of a model from a user selected folder
     if(koboldai_vars.model == "selectfolder"):
-        print("{0}Please choose the folder where pytorch_model.bin is located:{1}\n".format(colors.CYAN, colors.END))
+        print("{0}Please choose the folder where pytorch_model.bin is located:{1}\n".format(Colors.CYAN, Colors.END))
         modpath = fileops.getdirpath(getcwd() + "/models", "Select Model Folder")
     
         if(modpath):
@@ -1325,631 +1217,6 @@ def download():
     return(save)
 
 
-#============================ LUA API =============================#
-_bridged = {}
-F = TypeVar("F", bound=Callable)
-def lua_startup():
-    global _bridged
-    global F
-    global bridged
-    #if(path.exists("settings/" + getmodelname().replace('/', '_') + ".settings")):
-    #    file = open("settings/" + getmodelname().replace('/', '_') + ".settings", "r")
-    #    js   = json.load(file)
-    #    if("userscripts" in js):
-    #        koboldai_vars.userscripts = []
-    #        for userscript in js["userscripts"]:
-    #            if type(userscript) is not str:
-    #               continue
-    #            userscript = userscript.strip()
-    #            if len(userscript) != 0 and all(q not in userscript for q in ("..", ":")) and all(userscript[0] not in q for q in ("/", "\\")) and os.path.exists(fileops.uspath(userscript)):
-    #                koboldai_vars.userscripts.append(userscript)
-    #    if("corescript" in js and type(js["corescript"]) is str and all(q not in js["corescript"] for q in ("..", ":")) and all(js["corescript"][0] not in q for q in ("/", "\\"))):
-    #        koboldai_vars.corescript = js["corescript"]
-    #    else:
-    #        koboldai_vars.corescript = "default.lua"
-    #    file.close()
-        
-    #==================================================================#
-    #  Lua runtime startup
-    #==================================================================#
-
-    print("", end="", flush=True)
-    logger.init("LUA bridge", status="Starting")
-
-    # Set up Lua state
-    koboldai_vars.lua_state = lupa.LuaRuntime(unpack_returned_tuples=True)
-
-    # Load bridge.lua
-    bridged = {
-        "corescript_path": "cores",
-        "userscript_path": "userscripts",
-        "config_path": "userscripts",
-        "lib_paths": koboldai_vars.lua_state.table("lualibs", os.path.join("extern", "lualibs")),
-        "koboldai_vars": koboldai_vars,
-    }
-    for kwarg in _bridged:
-        bridged[kwarg] = _bridged[kwarg]
-    try:
-        koboldai_vars.lua_kobold, koboldai_vars.lua_koboldcore, koboldai_vars.lua_koboldbridge = koboldai_vars.lua_state.globals().dofile("bridge.lua")(
-            koboldai_vars.lua_state.globals().python,
-            bridged,
-        )
-    except lupa.LuaError as e:
-        print(colors.RED + "ERROR!" + colors.END)
-        koboldai_vars.lua_koboldbridge.obliterate_multiverse()
-        logger.error('LUA ERROR: ' + str(e).replace("\033", ""))
-        logger.warning("Lua engine stopped; please open 'Userscripts' and press Load to reinitialize scripts.")
-        socketio.emit("error", str(e), broadcast=True, room="UI_2")
-        exit(1)
-    logger.init_ok("LUA bridge", status="OK")
-
-
-def lua_log_format_name(name):
-    return f"[{name}]" if type(name) is str else "CORE"
-
-
-def bridged_kwarg(name=None):
-    def _bridged_kwarg(f: F):
-        _bridged[name if name is not None else f.__name__[4:] if f.__name__[:4] == "lua_" else f.__name__] = f
-        return f
-    return _bridged_kwarg
-
-#==================================================================#
-#  Event triggered when a userscript is loaded
-#==================================================================#
-@bridged_kwarg()
-def load_callback(filename, modulename):
-    print(colors.GREEN + f"Loading Userscript [{modulename}] <{filename}>" + colors.END)
-
-#==================================================================#
-#  Load all Lua scripts
-#==================================================================#
-def load_lua_scripts():
-    logger.init("LUA Scripts", status="Starting")
-
-    filenames = []
-    modulenames = []
-    descriptions = []
-
-    lst = fileops.getusfiles(long_desc=True)
-    filenames_dict = {ob["filename"]: i for i, ob in enumerate(lst)}
-
-    for filename in koboldai_vars.userscripts:
-        if filename in filenames_dict:
-            i = filenames_dict[filename]
-            filenames.append(filename)
-            modulenames.append(lst[i]["modulename"])
-            descriptions.append(lst[i]["description"])
-
-    koboldai_vars.has_genmod = False
-
-    try:
-        koboldai_vars.lua_koboldbridge.obliterate_multiverse()
-        tpool.execute(koboldai_vars.lua_koboldbridge.load_corescript, koboldai_vars.corescript)
-        koboldai_vars.has_genmod = tpool.execute(koboldai_vars.lua_koboldbridge.load_userscripts, filenames, modulenames, descriptions)
-        koboldai_vars.lua_running = True
-    except lupa.LuaError as e:
-        try:
-            koboldai_vars.lua_koboldbridge.obliterate_multiverse()
-        except:
-            pass
-        koboldai_vars.lua_running = False
-        if(koboldai_vars.serverstarted):
-            emit('from_server', {'cmd': 'errmsg', 'data': 'Lua script error; please check console.'}, broadcast=True, room="UI_1")
-            sendUSStatItems()
-        logger.error('LUA ERROR: ' + str(e).replace("\033", ""))
-        logger.warning("Lua engine stopped; please open 'Userscripts' and press Load to reinitialize scripts.")
-        socketio.emit("error", str(e), broadcast=True, room="UI_2")
-        if(koboldai_vars.serverstarted):
-            set_aibusy(False)
-    logger.init_ok("LUA Scripts", status="OK")
-
-#==================================================================#
-#  Print message that originates from the userscript with the given name
-#==================================================================#
-@bridged_kwarg()
-def lua_print(msg):
-    if(koboldai_vars.lua_logname != koboldai_vars.lua_koboldbridge.logging_name):
-        koboldai_vars.lua_logname = koboldai_vars.lua_koboldbridge.logging_name
-        print(colors.BLUE + lua_log_format_name(koboldai_vars.lua_logname) + ":" + colors.END, file=sys.stderr)
-    print(colors.PURPLE + msg.replace("\033", "") + colors.END)
-
-#==================================================================#
-#  Print warning that originates from the userscript with the given name
-#==================================================================#
-@bridged_kwarg()
-def lua_warn(msg):
-    if(koboldai_vars.lua_logname != koboldai_vars.lua_koboldbridge.logging_name):
-        koboldai_vars.lua_logname = koboldai_vars.lua_koboldbridge.logging_name
-        print(colors.BLUE + lua_log_format_name(koboldai_vars.lua_logname) + ":" + colors.END, file=sys.stderr)
-    print(colors.YELLOW + msg.replace("\033", "") + colors.END)
-
-#==================================================================#
-#  Decode tokens into a string using current tokenizer
-#==================================================================#
-@bridged_kwarg()
-def lua_decode(tokens):
-    tokens = list(tokens.values())
-    assert type(tokens) is list
-    if("tokenizer" not in globals()):
-        from transformers import GPT2Tokenizer
-        global tokenizer
-        tokenizer = GPT2Tokenizer.from_pretrained("gpt2", revision=koboldai_vars.revision, cache_dir="cache")
-    return utils.decodenewlines(tokenizer.decode(tokens))
-
-#==================================================================#
-#  Encode string into list of token IDs using current tokenizer
-#==================================================================#
-@bridged_kwarg()
-def lua_encode(string):
-    assert type(string) is str
-    if("tokenizer" not in globals()):
-        from transformers import GPT2Tokenizer
-        global tokenizer
-        tokenizer = GPT2Tokenizer.from_pretrained("gpt2", revision=koboldai_vars.revision, cache_dir="cache")
-    return tokenizer.encode(utils.encodenewlines(string))
-
-#==================================================================#
-#  Computes context given a submission, Lua array of entry UIDs and a Lua array
-#  of folder UIDs
-#==================================================================#
-@bridged_kwarg()
-def lua_compute_context(submission, entries, folders, kwargs):
-    assert type(submission) is str
-    if(kwargs is None):
-        kwargs = koboldai_vars.lua_state.table()
-    actions = koboldai_vars.actions
-    allowed_entries = None
-    allowed_folders = None
-    if(entries is not None):
-        allowed_entries = set()
-        i = 1
-        while(entries[i] is not None):
-            allowed_entries.add(int(entries[i]))
-            i += 1
-    if(folders is not None):
-        allowed_folders = set()
-        i = 1
-        while(folders[i] is not None):
-            allowed_folders.add(int(folders[i]))
-            i += 1
-    txt, _, _, found_entries = koboldai_vars.calc_ai_text(submitted_text=submission,
-                                                allowed_wi_entries=allowed_entries,
-                                                allowed_wi_folders=allowed_folders)
-    return utils.decodenewlines(tokenizer.decode(txt))
-
-#==================================================================#
-#  Get property of a world info entry given its UID and property name
-#==================================================================#
-@bridged_kwarg()
-def lua_get_attr(uid, k):
-    assert type(uid) is int and type(k) is str
-    if(uid in koboldai_vars.worldinfo_u and k in (
-        "key",
-        "keysecondary",
-        "content",
-        "comment",
-        "folder",
-        "num",
-        "selective",
-        "constant",
-        "uid",
-    )):
-        return koboldai_vars.worldinfo_u[uid][k]
-
-#==================================================================#
-#  Set property of a world info entry given its UID, property name and new value
-#==================================================================#
-@bridged_kwarg()
-def lua_set_attr(uid, k, v):
-    assert type(uid) is int and type(k) is str
-    assert uid in koboldai_vars.worldinfo_u and k in (
-        "key",
-        "keysecondary",
-        "content",
-        "comment",
-        "selective",
-        "constant",
-    )
-    if(type(koboldai_vars.worldinfo_u[uid][k]) is int and type(v) is float):
-        v = int(v)
-    assert type(koboldai_vars.worldinfo_u[uid][k]) is type(v)
-    koboldai_vars.worldinfo_u[uid][k] = v
-    print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} set {k} of world info entry {uid} to {v}" + colors.END)
-    koboldai_vars.sync_worldinfo_v1_to_v2()
-    sendwi()
-
-#==================================================================#
-#  Get property of a world info folder given its UID and property name
-#==================================================================#
-@bridged_kwarg()
-def lua_folder_get_attr(uid, k):
-    assert type(uid) is int and type(k) is str
-    if(uid in koboldai_vars.wifolders_d and k in (
-        "name",
-    )):
-        return koboldai_vars.wifolders_d[uid][k]
-
-#==================================================================#
-#  Set property of a world info folder given its UID, property name and new value
-#==================================================================#
-@bridged_kwarg()
-def lua_folder_set_attr(uid, k, v):
-    assert type(uid) is int and type(k) is str
-    assert uid in koboldai_vars.wifolders_d and k in (
-        "name",
-    )
-    if(type(koboldai_vars.wifolders_d[uid][k]) is int and type(v) is float):
-        v = int(v)
-    assert type(koboldai_vars.wifolders_d[uid][k]) is type(v)
-    koboldai_vars.wifolders_d[uid][k] = v
-    print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} set {k} of world info folder {uid} to {v}" + colors.END)
-    koboldai_vars.sync_worldinfo_v1_to_v2()
-    sendwi()
-
-#==================================================================#
-#  Get the "Amount to Generate"
-#==================================================================#
-@bridged_kwarg()
-def lua_get_genamt():
-    return koboldai_vars.genamt
-
-#==================================================================#
-#  Set the "Amount to Generate"
-#==================================================================#
-@bridged_kwarg()
-def lua_set_genamt(genamt):
-    assert koboldai_vars.lua_koboldbridge.userstate != "genmod" and type(genamt) in (int, float) and genamt >= 0
-    print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} set genamt to {int(genamt)}" + colors.END)
-    koboldai_vars.genamt = int(genamt)
-
-#==================================================================#
-#  Get the "Gens Per Action"
-#==================================================================#
-@bridged_kwarg()
-def lua_get_numseqs():
-    return koboldai_vars.numseqs
-
-#==================================================================#
-#  Set the "Gens Per Action"
-#==================================================================#
-@bridged_kwarg()
-def lua_set_numseqs(numseqs):
-    assert type(numseqs) in (int, float) and numseqs >= 1
-    print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} set numseqs to {int(numseqs)}" + colors.END)
-    koboldai_vars.numseqs = int(numseqs)
-
-#==================================================================#
-#  Check if a setting exists with the given name
-#==================================================================#
-@bridged_kwarg()
-def lua_has_setting(setting):
-    return setting in (
-        "anotedepth",
-        "settemp",
-        "settopp",
-        "settopk",
-        "settfs",
-        "settypical",
-        "settopa",
-        "setreppen",
-        "setreppenslope",
-        "setreppenrange",
-        "settknmax",
-        "setwidepth",
-        "setuseprompt",
-        "setadventure",
-        "setchatmode",
-        "setdynamicscan",
-        "setnopromptgen",
-        "autosave",
-        "setrngpersist",
-        "temp",
-        "topp",
-        "top_p",
-        "topk",
-        "top_k",
-        "tfs",
-        "typical",
-        "topa",
-        "reppen",
-        "reppenslope",
-        "reppenrange",
-        "tknmax",
-        "widepth",
-        "useprompt",
-        "chatmode",
-        "chatname",
-        "botname",
-        "adventure",
-        "dynamicscan",
-        "nopromptgen",
-        "rngpersist",
-        "frmttriminc",
-        "frmtrmblln",
-        "frmtrmspch",
-        "frmtadsnsp",
-        "frmtsingleline",
-        "triminc",
-        "rmblln",
-        "rmspch",
-        "adsnsp",
-        "singleline",
-        "output_streaming",
-        "show_probs"
-    )
-
-#==================================================================#
-#  Return the setting with the given name if it exists
-#==================================================================#
-@bridged_kwarg()
-def lua_get_setting(setting):
-    if(setting in ("settemp", "temp")): return koboldai_vars.temp
-    if(setting in ("settopp", "topp", "top_p")): return koboldai_vars.top_p
-    if(setting in ("settopk", "topk", "top_k")): return koboldai_vars.top_k
-    if(setting in ("settfs", "tfs")): return koboldai_vars.tfs
-    if(setting in ("settypical", "typical")): return koboldai_vars.typical
-    if(setting in ("settopa", "topa")): return koboldai_vars.top_a
-    if(setting in ("setreppen", "reppen")): return koboldai_vars.rep_pen
-    if(setting in ("setreppenslope", "reppenslope")): return koboldai_vars.rep_pen_slope
-    if(setting in ("setreppenrange", "reppenrange")): return koboldai_vars.rep_pen_range
-    if(setting in ("settknmax", "tknmax")): return koboldai_vars.max_length
-    if(setting == "anotedepth"): return koboldai_vars.andepth
-    if(setting in ("setwidepth", "widepth")): return koboldai_vars.widepth
-    if(setting in ("setuseprompt", "useprompt")): return koboldai_vars.useprompt
-    if(setting in ("setadventure", "adventure")): return koboldai_vars.adventure
-    if(setting in ("setchatmode", "chatmode")): return koboldai_vars.chatmode
-    if(setting in ("setdynamicscan", "dynamicscan")): return koboldai_vars.dynamicscan
-    if(setting in ("setnopromptgen", "nopromptgen")): return koboldai_vars.nopromptgen
-    if(setting in ("autosave", "autosave")): return koboldai_vars.autosave
-    if(setting in ("setrngpersist", "rngpersist")): return koboldai_vars.rngpersist
-    if(setting in ("frmttriminc", "triminc")): return koboldai_vars.frmttriminc
-    if(setting in ("frmtrmblln", "rmblln")): return koboldai_vars.frmttrmblln
-    if(setting in ("frmtrmspch", "rmspch")): return koboldai_vars.frmttrmspch
-    if(setting in ("frmtadsnsp", "adsnsp")): return koboldai_vars.frmtadsnsp
-    if(setting in ("frmtsingleline", "singleline")): return koboldai_vars.singleline
-    if(setting == "output_streaming"): return koboldai_vars.output_streaming
-    if(setting == "show_probs"): return koboldai_vars.show_probs
-
-#==================================================================#
-#  Set the setting with the given name if it exists
-#==================================================================#
-@bridged_kwarg()
-def lua_set_setting(setting, v):
-    actual_type = type(lua_get_setting(setting))
-    assert v is not None and (actual_type is type(v) or (actual_type is int and type(v) is float))
-    v = actual_type(v)
-    print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} set {setting} to {v}" + colors.END)
-    if(setting in ("setadventure", "adventure") and v):
-        koboldai_vars.actionmode = 1
-    if(setting in ("settemp", "temp")): koboldai_vars.temp = v
-    if(setting in ("settopp", "topp")): koboldai_vars.top_p = v
-    if(setting in ("settopk", "topk")): koboldai_vars.top_k = v
-    if(setting in ("settfs", "tfs")): koboldai_vars.tfs = v
-    if(setting in ("settypical", "typical")): koboldai_vars.typical = v
-    if(setting in ("settopa", "topa")): koboldai_vars.top_a = v
-    if(setting in ("setreppen", "reppen")): koboldai_vars.rep_pen = v
-    if(setting in ("setreppenslope", "reppenslope")): koboldai_vars.rep_pen_slope = v
-    if(setting in ("setreppenrange", "reppenrange")): koboldai_vars.rep_pen_range = v
-    if(setting in ("settknmax", "tknmax")): koboldai_vars.max_length = v; return True
-    if(setting == "anotedepth"): koboldai_vars.andepth = v; return True
-    if(setting in ("setwidepth", "widepth")): koboldai_vars.widepth = v; return True
-    if(setting in ("setuseprompt", "useprompt")): koboldai_vars.useprompt = v; return True
-    if(setting in ("setadventure", "adventure")): koboldai_vars.adventure = v
-    if(setting in ("setdynamicscan", "dynamicscan")): koboldai_vars.dynamicscan = v
-    if(setting in ("setnopromptgen", "nopromptgen")): koboldai_vars.nopromptgen = v
-    if(setting in ("autosave", "noautosave")): koboldai_vars.autosave = v
-    if(setting in ("setrngpersist", "rngpersist")): koboldai_vars.rngpersist = v
-    if(setting in ("setchatmode", "chatmode")): koboldai_vars.chatmode = v
-    if(setting in ("frmttriminc", "triminc")): koboldai_vars.frmttriminc = v
-    if(setting in ("frmtrmblln", "rmblln")): koboldai_vars.frmttrmblln = v
-    if(setting in ("frmtrmspch", "rmspch")): koboldai_vars.frmttrmspch = v
-    if(setting in ("frmtadsnsp", "adsnsp")): koboldai_vars.frmtadsnsp = v
-    if(setting in ("frmtsingleline", "singleline")): koboldai_vars.singleline = v
-    if(setting == "output_streaming"): koboldai_vars.output_streaming = v
-    if(setting == "show_probs"): koboldai_vars.show_probs = v
-
-#==================================================================#
-#  Get contents of memory
-#==================================================================#
-@bridged_kwarg()
-def lua_get_memory():
-    return koboldai_vars.memory
-
-#==================================================================#
-#  Set contents of memory
-#==================================================================#
-@bridged_kwarg()
-def lua_set_memory(m):
-    assert type(m) is str
-    koboldai_vars.memory = m
-
-#==================================================================#
-#  Get contents of author's note
-#==================================================================#
-@bridged_kwarg()
-def lua_get_authorsnote():
-    return koboldai_vars.authornote
-
-#==================================================================#
-#  Set contents of author's note
-#==================================================================#
-@bridged_kwarg()
-def lua_set_authorsnote(m):
-    assert type(m) is str
-    koboldai_vars.authornote = m
-
-#==================================================================#
-#  Get contents of author's note template
-#==================================================================#
-@bridged_kwarg()
-def lua_get_authorsnotetemplate():
-    return koboldai_vars.authornotetemplate
-
-#==================================================================#
-#  Set contents of author's note template
-#==================================================================#
-@bridged_kwarg()
-def lua_set_authorsnotetemplate(m):
-    assert type(m) is str
-    koboldai_vars.authornotetemplate = m
-
-#==================================================================#
-#  Save settings and send them to client
-#==================================================================#
-@bridged_kwarg()
-def lua_resend_settings():
-    print("lua_resend_settings")
-    settingschanged()
-    refresh_settings()
-
-#==================================================================#
-#  Set story chunk text and delete the chunk if the new chunk is empty
-#==================================================================#
-@bridged_kwarg()
-def lua_set_chunk(k, v):
-    assert type(k) in (int, None) and type(v) is str
-    assert k >= 0
-    assert k != 0 or len(v) != 0
-    if(len(v) == 0):
-        print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} deleted story chunk {k}" + colors.END)
-        chunk = int(k)
-        koboldai_vars.actions.delete_action(chunk-1)
-        koboldai_vars.lua_deleted.add(chunk)
-        send_debug()
-    else:
-        if(k == 0):
-            print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} edited prompt chunk" + colors.END)
-        else:
-            print(colors.GREEN + f"{lua_log_format_name(koboldai_vars.lua_koboldbridge.logging_name)} edited story chunk {k}" + colors.END)
-        chunk = int(k)
-        if(chunk == 0):
-            if(koboldai_vars.lua_koboldbridge.userstate == "genmod"):
-                koboldai_vars._prompt = v
-            koboldai_vars.lua_edited.add(chunk)
-            koboldai_vars.prompt = v
-        else:
-            koboldai_vars.lua_edited.add(chunk)
-            koboldai_vars.actions[chunk-1] = v
-            send_debug()
-
-#==================================================================#
-#  Get model type as "gpt-2-xl", "gpt-neo-2.7B", etc.
-#==================================================================#
-@bridged_kwarg()
-def lua_get_modeltype():
-    if(koboldai_vars.noai):
-        return "readonly"
-    if(koboldai_vars.model in ("Colab", "API", "CLUSTER", "OAI", "InferKit")):
-        return "api"
-    if(not koboldai_vars.use_colab_tpu and koboldai_vars.model not in ("TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX") and (koboldai_vars.model in ("GPT2Custom", "NeoCustom") or koboldai_vars.model_type in ("gpt2", "gpt_neo", "gptj"))):
-        hidden_size = get_hidden_size_from_model(model)
-    if(koboldai_vars.model in ("gpt2",) or (koboldai_vars.model_type == "gpt2" and hidden_size == 768)):
-        return "gpt2"
-    if(koboldai_vars.model in ("gpt2-medium",) or (koboldai_vars.model_type == "gpt2" and hidden_size == 1024)):
-        return "gpt2-medium"
-    if(koboldai_vars.model in ("gpt2-large",) or (koboldai_vars.model_type == "gpt2" and hidden_size == 1280)):
-        return "gpt2-large"
-    if(koboldai_vars.model in ("gpt2-xl",) or (koboldai_vars.model_type == "gpt2" and hidden_size == 1600)):
-        return "gpt2-xl"
-    if(koboldai_vars.model_type == "gpt_neo" and hidden_size == 768):
-        return "gpt-neo-125M"
-    if(koboldai_vars.model in ("EleutherAI/gpt-neo-1.3B",) or (koboldai_vars.model_type == "gpt_neo" and hidden_size == 2048)):
-        return "gpt-neo-1.3B"
-    if(koboldai_vars.model in ("EleutherAI/gpt-neo-2.7B",) or (koboldai_vars.model_type == "gpt_neo" and hidden_size == 2560)):
-        return "gpt-neo-2.7B"
-    if(koboldai_vars.model in ("EleutherAI/gpt-j-6B",) or ((koboldai_vars.use_colab_tpu or koboldai_vars.model == "TPUMeshTransformerGPTJ") and tpu_mtj_backend.params["d_model"] == 4096) or (koboldai_vars.model_type in ("gpt_neo", "gptj") and hidden_size == 4096)):
-        return "gpt-j-6B"
-    return "unknown"
-
-#==================================================================#
-#  Get model backend as "transformers" or "mtj"
-#==================================================================#
-@bridged_kwarg()
-def lua_get_modelbackend():
-    if(koboldai_vars.noai):
-        return "readonly"
-    if(koboldai_vars.model in ("Colab", "API", "CLUSTER", "OAI", "InferKit")):
-        return "api"
-    if(koboldai_vars.use_colab_tpu or koboldai_vars.model in ("TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX")):
-        return "mtj"
-    return "transformers"
-
-#==================================================================#
-#  Check whether model is loaded from a custom path
-#==================================================================#
-@bridged_kwarg()
-def lua_is_custommodel():
-    return koboldai_vars.model in ("GPT2Custom", "NeoCustom", "TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX")
-
-#==================================================================#
-#  Return the filename (as a string) of the current soft prompt, or
-#  None if no soft prompt is loaded
-#==================================================================#
-@bridged_kwarg()
-def lua_get_spfilename():
-    return koboldai_vars.spfilename.strip() or None
-
-#==================================================================#
-#  When called with a string as argument, sets the current soft prompt;
-#  when called with None as argument, uses no soft prompt.
-#  Returns True if soft prompt changed, False otherwise.
-#==================================================================#
-@bridged_kwarg()
-def lua_set_spfilename(filename: Union[str, None]):
-    if(filename is None):
-        filename = ""
-    filename = str(filename).strip()
-    changed = lua_get_spfilename() != filename
-    assert all(q not in filename for q in ("/", "\\"))
-    load_softprompt(filename)
-    return changed
-
-#==================================================================#
-#  
-#==================================================================#
-def execute_inmod():
-    setgamesaved(False)
-    koboldai_vars.lua_logname = ...
-    koboldai_vars.lua_edited = set()
-    koboldai_vars.lua_deleted = set()
-    try:
-        tpool.execute(koboldai_vars.lua_koboldbridge.execute_inmod)
-    except lupa.LuaError as e:
-        koboldai_vars.lua_koboldbridge.obliterate_multiverse()
-        koboldai_vars.lua_running = False
-        emit('from_server', {'cmd': 'errmsg', 'data': 'Lua script error; please check console.'}, broadcast=True, room="UI_1")
-        sendUSStatItems()
-        logger.error('LUA ERROR: ' + str(e).replace("\033", ""))
-        logger.warning("Lua engine stopped; please open 'Userscripts' and press Load to reinitialize scripts.")
-        socketio.emit("error", str(e), broadcast=True, room="UI_2")
-        set_aibusy(False)
-
-def execute_genmod():
-    koboldai_vars.lua_koboldbridge.execute_genmod()
-
-def execute_outmod():
-    setgamesaved(False)
-    emit('from_server', {'cmd': 'hidemsg', 'data': ''}, broadcast=True, room="UI_1")
-    try:
-        tpool.execute(koboldai_vars.lua_koboldbridge.execute_outmod)
-    except lupa.LuaError as e:
-        koboldai_vars.lua_koboldbridge.obliterate_multiverse()
-        koboldai_vars.lua_running = False
-        emit('from_server', {'cmd': 'errmsg', 'data': 'Lua script error; please check console.'}, broadcast=True, room="UI_1")
-        sendUSStatItems()
-        logger.error('LUA ERROR: ' + str(e).replace("\033", ""))
-        logger.warning("Lua engine stopped; please open 'Userscripts' and press Load to reinitialize scripts.")
-        socketio.emit("error", str(e), broadcast=True, room="UI_2")
-        set_aibusy(False)
-    if(koboldai_vars.lua_koboldbridge.resend_settings_required):
-        koboldai_vars.lua_koboldbridge.resend_settings_required = False
-        lua_resend_settings()
-    for k in koboldai_vars.lua_edited:
-        inlineedit(k, koboldai_vars.actions[k])
-    for k in koboldai_vars.lua_deleted:
-        inlinedelete(k)
-
 
 
 
@@ -1978,7 +1245,7 @@ def do_connect():
     if request.args.get("ui") == "2":
         ui2_connect()
         return
-    logger.debug("{0}Client connected!{1}".format(colors.GREEN, colors.END))
+    logger.debug("{0}Client connected!{1}".format(Colors.GREEN, Colors.END))
     emit('from_server', {'cmd': 'setchatname', 'data': koboldai_vars.chatname}, room="UI_1")
     emit('from_server', {'cmd': 'setbotname', 'data': koboldai_vars.botname}, room="UI_1")
     emit('from_server', {'cmd': 'setanotetemplate', 'data': koboldai_vars.authornotetemplate}, room="UI_1")
@@ -2509,7 +1776,7 @@ def get_message(msg):
         koboldai_vars.debug = msg['data']
         emit('from_server', {'cmd': 'set_debug', 'data': msg['data']}, broadcast=True, room="UI_1")
         if koboldai_vars.debug:
-            send_debug()
+            ui1_send_debug()
     elif(msg['cmd'] == 'getfieldbudget'):
         unencoded = msg["data"]["unencoded"]
         field = msg["data"]["field"]
@@ -2555,14 +1822,6 @@ def sendUSStatItems():
     koboldai_vars.last_userscripts = last_userscripts
 
 #==================================================================#
-#  KoboldAI Markup Formatting (Mixture of Markdown and sanitized html)
-#==================================================================#
-def kml(txt):
-   txt = txt.replace('>', '&gt;')
-   txt = bleach.clean(markdown.markdown(txt), tags = ['p', 'em', 'strong', 'code', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'ul', 'b', 'i', 'a', 'span', 'button'], styles = ['color', 'font-weight'], attributes=['id', 'class', 'style', 'href'])
-   return txt
-
-#==================================================================#
 #  Send start message and tell Javascript to set UI state
 #==================================================================#
 def setStartState():
@@ -2601,15 +1860,6 @@ def sendsettings():
         # Add format key to vars if it wasn't loaded with client.settings
         if(not hasattr(koboldai_vars, frm["id"])):
             setattr(koboldai_vars, frm["id"], False)
-
-#==================================================================#
-#  Set value of gamesaved
-#==================================================================#
-def setgamesaved(gamesaved):
-    assert type(gamesaved) is bool
-    if(gamesaved != koboldai_vars.gamesaved):
-        socketio.emit('from_server', {'cmd': 'gamesaved', 'data': gamesaved}, broadcast=True, room="UI_1")
-    koboldai_vars.gamesaved = gamesaved
 
 #==================================================================#
 #  Take input text from SocketIO and decide what to do with it
@@ -2780,7 +2030,7 @@ def actionsubmit(data, actionmode=0, force_submit=False, force_prompt_gen=False,
                 else:
                     koboldai_vars.actions.append(data, submission=True)
                 update_story_chunk('last')
-                send_debug()
+                ui1_send_debug()
 
             if(not no_generate and not koboldai_vars.noai and koboldai_vars.lua_koboldbridge.generating):
                 # Off to the tokenizer!
@@ -2898,7 +2148,7 @@ def actionretry(data):
         return
     if actionback():
         actionsubmit("", actionmode=koboldai_vars.actionmode, force_submit=True)
-        send_debug()
+        ui1_send_debug()
     elif(not koboldai_vars.useprompt):
         emit('from_server', {'cmd': 'errmsg', 'data': "Please enable \"Always Add Prompt\" to retry with your prompt."}, room="UI_1")
 
@@ -2921,7 +2171,7 @@ def actionback():
     else:
         koboldai_vars.genseqs = []
         success = True
-    send_debug()
+    ui1_send_debug()
     return success
         
 def actionredo():
@@ -2933,7 +2183,7 @@ def actionredo():
     else:
         koboldai_vars.genseqs = [{"generated_text": x[0]} for x in genout]
         emit('from_server', {'cmd': 'genseqs', 'data': genout}, broadcast=True, room="UI_1")
-    send_debug()
+    ui1_send_debug()
 
 #==================================================================#
 #  
@@ -3281,7 +2531,7 @@ def genresult(genout, flash=True, ignore_formatting=False):
     update_story_chunk('last')
     if(flash):
         emit('from_server', {'cmd': 'texteffect', 'data': koboldai_vars.actions.get_last_key() + 1 if len(koboldai_vars.actions) else 0}, broadcast=True, room="UI_1")
-    send_debug()
+    ui1_send_debug()
 
 #==================================================================#
 #  Send generator sequences to the UI for selection
@@ -3305,7 +2555,7 @@ def genselect(genout):
 
     # Send sequences to UI for selection
     emit('from_server', {'cmd': 'genseqs', 'data': genout}, broadcast=True, room="UI_1")
-    send_debug()
+    ui1_send_debug()
 
 #==================================================================#
 #  Send selected sequence to action log and refresh UI
@@ -3323,7 +2573,7 @@ def selectsequence(n):
 
     if(koboldai_vars.lua_koboldbridge.restart_sequence is not None):
         actionsubmit("", actionmode=koboldai_vars.actionmode, force_submit=True, disable_recentrng=True)
-    send_debug()
+    ui1_send_debug()
 
 #==================================================================#
 #  Pin/Unpin the selected sequence
@@ -3332,7 +2582,7 @@ def pinsequence(n):
     if n.isnumeric():
         koboldai_vars.actions.toggle_pin(koboldai_vars.actions.get_last_key()+1, int(n))
         text = koboldai_vars.genseqs[int(n)]['generated_text']
-    send_debug()
+    ui1_send_debug()
 
 #==================================================================#
 # Replaces returns and newlines with HTML breaks
@@ -3496,7 +2746,7 @@ def editsubmit(data):
     update_story_chunk(koboldai_vars.editln)
     emit('from_server', {'cmd': 'texteffect', 'data': koboldai_vars.editln}, broadcast=True, room="UI_1")
     emit('from_server', {'cmd': 'editmode', 'data': 'false'}, room="UI_1")
-    send_debug()
+    ui1_send_debug()
 
 #==================================================================#
 #  
@@ -3512,345 +2762,8 @@ def deleterequest():
         koboldai_vars.mode = "play"
         remove_story_chunk(koboldai_vars.editln)
         emit('from_server', {'cmd': 'editmode', 'data': 'false'}, room="UI_1")
-    send_debug()
+    ui1_send_debug()
 
-#==================================================================#
-# 
-#==================================================================#
-def inlineedit(chunk, data):
-    koboldai_vars.recentedit = True
-    chunk = int(chunk)
-    if(chunk == 0):
-        if(len(data.strip()) == 0):
-            return
-        koboldai_vars.prompt = data
-    else:
-        if(chunk-1 in koboldai_vars.actions):
-            koboldai_vars.actions[chunk-1] = data
-        else:
-            logger.warning(f"Attempted to edit non-existent chunk {chunk}")
-
-    setgamesaved(False)
-    update_story_chunk(chunk)
-    emit('from_server', {'cmd': 'texteffect', 'data': chunk}, broadcast=True, room="UI_1")
-    emit('from_server', {'cmd': 'editmode', 'data': 'false'}, broadcast=True, room="UI_1")
-    send_debug()
-
-#==================================================================#
-#  
-#==================================================================#
-def inlinedelete(chunk):
-    koboldai_vars.recentedit = True
-    chunk = int(chunk)
-    # Don't delete prompt
-    if(chunk == 0):
-        # Send error message
-        update_story_chunk(chunk)
-        emit('from_server', {'cmd': 'errmsg', 'data': "Cannot delete the prompt."}, room="UI_1")
-        emit('from_server', {'cmd': 'editmode', 'data': 'false'}, broadcast=True, room="UI_1")
-    else:
-        if(chunk-1 in koboldai_vars.actions):
-            koboldai_vars.actions.delete_action(chunk-1)
-        else:
-            logger.warning(f"Attempted to delete non-existent chunk {chunk}")
-        setgamesaved(False)
-        remove_story_chunk(chunk)
-        emit('from_server', {'cmd': 'editmode', 'data': 'false'}, broadcast=True, room="UI_1")
-    send_debug()
-
-#==================================================================#
-#   Toggles the game mode for WI editing and sends UI commands
-#==================================================================#
-def togglewimode():
-    if(koboldai_vars.mode == "play"):
-        koboldai_vars.mode = "wi"
-        emit('from_server', {'cmd': 'wimode', 'data': 'true'}, broadcast=True, room="UI_1")
-    elif(koboldai_vars.mode == "wi"):
-        # Commit WI fields first
-        requestwi()
-        # Then set UI state back to Play
-        koboldai_vars.mode = "play"
-        emit('from_server', {'cmd': 'wimode', 'data': 'false'}, broadcast=True, room="UI_1")
-    sendwi()
-
-#==================================================================#
-#   
-#==================================================================#
-def addwiitem(folder_uid=None):
-    assert folder_uid is None or folder_uid in koboldai_vars.wifolders_d
-    ob = {"key": "", "keysecondary": "", "content": "", "comment": "", "folder": folder_uid, "num": len(koboldai_vars.worldinfo), "init": False, "selective": False, "constant": False}
-    koboldai_vars.worldinfo.append(ob)
-    while(True):
-        uid = str(int.from_bytes(os.urandom(4), "little", signed=True))
-        if(uid not in koboldai_vars.worldinfo_u):
-            break
-    koboldai_vars.worldinfo_u[uid] = koboldai_vars.worldinfo[-1]
-    koboldai_vars.worldinfo[-1]["uid"] = uid
-    if(folder_uid is not None):
-        koboldai_vars.wifolders_u[folder_uid].append(koboldai_vars.worldinfo[-1])
-    emit('from_server', {'cmd': 'addwiitem', 'data': ob}, broadcast=True, room="UI_1")
-
-#==================================================================#
-#   Creates a new WI folder with an unused cryptographically secure random UID
-#==================================================================#
-def addwifolder():
-    while(True):
-        uid = str(int.from_bytes(os.urandom(4), "little", signed=True))
-        if(uid not in koboldai_vars.wifolders_d):
-            break
-    ob = {"name": "", "collapsed": False}
-    koboldai_vars.wifolders_d[uid] = ob
-    koboldai_vars.wifolders_l.append(uid)
-    koboldai_vars.wifolders_u[uid] = []
-    emit('from_server', {'cmd': 'addwifolder', 'uid': uid, 'data': ob}, broadcast=True, room="UI_1")
-    addwiitem(folder_uid=uid)
-
-#==================================================================#
-#   Move the WI entry with UID src so that it immediately precedes
-#   the WI entry with UID dst
-#==================================================================#
-def movewiitem(dst, src):
-    setgamesaved(False)
-    if(koboldai_vars.worldinfo_u[src]["folder"] is not None):
-        for i, e in enumerate(koboldai_vars.wifolders_u[koboldai_vars.worldinfo_u[src]["folder"]]):
-            if(e is koboldai_vars.worldinfo_u[src]):
-                koboldai_vars.wifolders_u[koboldai_vars.worldinfo_u[src]["folder"]].pop(i)
-                break
-    if(koboldai_vars.worldinfo_u[dst]["folder"] is not None):
-        koboldai_vars.wifolders_u[koboldai_vars.worldinfo_u[dst]["folder"]].append(koboldai_vars.worldinfo_u[src])
-    koboldai_vars.worldinfo_u[src]["folder"] = koboldai_vars.worldinfo_u[dst]["folder"]
-    for i, e in enumerate(koboldai_vars.worldinfo):
-        if(e is koboldai_vars.worldinfo_u[src]):
-            _src = i
-        elif(e is koboldai_vars.worldinfo_u[dst]):
-            _dst = i
-    koboldai_vars.worldinfo.insert(_dst - (_dst >= _src), koboldai_vars.worldinfo.pop(_src))
-    sendwi()
-
-#==================================================================#
-#   Move the WI folder with UID src so that it immediately precedes
-#   the WI folder with UID dst
-#==================================================================#
-def movewifolder(dst, src):
-    setgamesaved(False)
-    koboldai_vars.wifolders_l.remove(src)
-    if(dst is None):
-        # If dst is None, that means we should move src to be the last folder
-        koboldai_vars.wifolders_l.append(src)
-    else:
-        koboldai_vars.wifolders_l.insert(koboldai_vars.wifolders_l.index(dst), src)
-    sendwi()
-
-#==================================================================#
-#   
-#==================================================================#
-def sendwi():
-    # Cache len of WI
-    ln = len(koboldai_vars.worldinfo)
-
-    # Clear contents of WI container
-    emit('from_server', {'cmd': 'wistart', 'wifolders_d': koboldai_vars.wifolders_d, 'wifolders_l': koboldai_vars.wifolders_l, 'data': ''}, broadcast=True, room="UI_1")
-
-    # Stable-sort WI entries in order of folder
-    stablesortwi()
-
-    koboldai_vars.worldinfo_i = [wi for wi in koboldai_vars.worldinfo if wi["init"]]
-
-    # If there are no WI entries, send an empty WI object
-    if(ln == 0):
-        addwiitem()
-    else:
-        # Send contents of WI array
-        last_folder = ...
-        for wi in koboldai_vars.worldinfo:
-            if(wi["folder"] != last_folder):
-                emit('from_server', {'cmd': 'addwifolder', 'uid': wi["folder"], 'data': koboldai_vars.wifolders_d[str(wi["folder"])] if wi["folder"] is not None else None}, broadcast=True, room="UI_1")
-                last_folder = wi["folder"]
-            ob = wi
-            emit('from_server', {'cmd': 'addwiitem', 'data': ob}, broadcast=True, room="UI_1")
-    
-    emit('from_server', {'cmd': 'wifinish', 'data': ''}, broadcast=True, room="UI_1")
-
-#==================================================================#
-#  Request current contents of all WI HTML elements
-#==================================================================#
-def requestwi():
-    list = []
-    for wi in koboldai_vars.worldinfo:
-        list.append(wi["num"])
-    emit('from_server', {'cmd': 'requestwiitem', 'data': list}, room="UI_1")
-
-#==================================================================#
-#  Stable-sort WI items so that items in the same folder are adjacent,
-#  and items in different folders are sorted based on the order of the folders
-#==================================================================#
-def stablesortwi():
-    mapping = {uid: index for index, uid in enumerate(koboldai_vars.wifolders_l)}
-    koboldai_vars.worldinfo.sort(key=lambda x: mapping[x["folder"]] if x["folder"] is not None else float("inf"))
-    last_folder = ...
-    last_wi = None
-    for i, wi in enumerate(koboldai_vars.worldinfo):
-        wi["num"] = i
-        wi["init"] = True
-        if(wi["folder"] != last_folder):
-            if(last_wi is not None and last_folder is not ...):
-                last_wi["init"] = False
-            last_folder = wi["folder"]
-        last_wi = wi
-    if(last_wi is not None):
-        last_wi["init"] = False
-    for folder in koboldai_vars.wifolders_u:
-        koboldai_vars.wifolders_u[folder].sort(key=lambda x: x["num"])
-
-#==================================================================#
-#  Extract object from server and send it to WI objects
-#==================================================================#
-def commitwi(ar):
-    for ob in ar:
-        ob["uid"] = str(ob["uid"])
-        koboldai_vars.worldinfo_u[ob["uid"]]["key"]          = ob["key"]
-        koboldai_vars.worldinfo_u[ob["uid"]]["keysecondary"] = ob["keysecondary"]
-        koboldai_vars.worldinfo_u[ob["uid"]]["content"]      = ob["content"]
-        koboldai_vars.worldinfo_u[ob["uid"]]["comment"]      = ob.get("comment", "")
-        koboldai_vars.worldinfo_u[ob["uid"]]["folder"]       = ob.get("folder", None)
-        koboldai_vars.worldinfo_u[ob["uid"]]["selective"]    = ob["selective"]
-        koboldai_vars.worldinfo_u[ob["uid"]]["constant"]     = ob.get("constant", False)
-    stablesortwi()
-    koboldai_vars.worldinfo_i = [wi for wi in koboldai_vars.worldinfo if wi["init"]]
-    koboldai_vars.sync_worldinfo_v1_to_v2()
-    sendwi()
-
-#==================================================================#
-#  
-#==================================================================#
-def deletewi(uid):
-    if(uid in koboldai_vars.worldinfo_u):
-        setgamesaved(False)
-        # Store UID of deletion request
-        koboldai_vars.deletewi = uid
-        if(koboldai_vars.deletewi is not None):
-            if(koboldai_vars.worldinfo_u[koboldai_vars.deletewi]["folder"] is not None):
-                for i, e in enumerate(koboldai_vars.wifolders_u[koboldai_vars.worldinfo_u[koboldai_vars.deletewi]["folder"]]):
-                    if(e is koboldai_vars.worldinfo_u[koboldai_vars.deletewi]):
-                        koboldai_vars.wifolders_u[koboldai_vars.worldinfo_u[koboldai_vars.deletewi]["folder"]].pop(i)
-            for i, e in enumerate(koboldai_vars.worldinfo):
-                if(e is koboldai_vars.worldinfo_u[koboldai_vars.deletewi]):
-                    del koboldai_vars.worldinfo[i]
-                    break
-            del koboldai_vars.worldinfo_u[koboldai_vars.deletewi]
-            # Send the new WI array structure
-            sendwi()
-            # And reset deletewi
-            koboldai_vars.deletewi = None
-
-#==================================================================#
-#  
-#==================================================================#
-def deletewifolder(uid):
-    uid = str(uid)
-    del koboldai_vars.wifolders_u[uid]
-    del koboldai_vars.wifolders_d[uid]
-    del koboldai_vars.wifolders_l[koboldai_vars.wifolders_l.index(uid)]
-    setgamesaved(False)
-    # Delete uninitialized entries in the folder we're going to delete
-    koboldai_vars.worldinfo = [wi for wi in koboldai_vars.worldinfo if wi["folder"] != uid or wi["init"]]
-    koboldai_vars.worldinfo_i = [wi for wi in koboldai_vars.worldinfo if wi["init"]]
-    # Move WI entries that are inside of the folder we're going to delete
-    # so that they're outside of all folders
-    for wi in koboldai_vars.worldinfo:
-        if(wi["folder"] == uid):
-            wi["folder"] = None
-
-    sendwi()
-
-#==================================================================#
-#  Look for WI keys in text to generator 
-#==================================================================#
-def checkworldinfo(txt, allowed_entries=None, allowed_folders=None, force_use_txt=False, scan_story=True, actions=None):
-    original_txt = txt
-
-    if(actions is None):
-        actions = koboldai_vars.actions
-
-    # Dont go any further if WI is empty
-    if(len(koboldai_vars.worldinfo) == 0):
-        return "", set()
-    
-    # Cache actions length
-    ln = len(actions)
-    
-    # Don't bother calculating action history if widepth is 0
-    if(koboldai_vars.widepth > 0 and scan_story):
-        depth = koboldai_vars.widepth
-        # If this is not a continue, add 1 to widepth since submitted
-        # text is already in action history @ -1
-        if(not force_use_txt and (txt != "" and koboldai_vars.prompt != txt)):
-            txt    = ""
-            depth += 1
-        
-        if(ln > 0):
-            chunks = actions[-depth:]
-            #i = 0
-            #for key in reversed(actions):
-            #    chunk = actions[key]
-            #    chunks.appendleft(chunk)
-            #    i += 1
-            #    if(i == depth):
-            #        break
-        if(ln >= depth):
-            txt = "".join(chunks)
-        elif(ln > 0):
-            txt = koboldai_vars.comregex_ai.sub('', koboldai_vars.prompt) + "".join(chunks)
-        elif(ln == 0):
-            txt = koboldai_vars.comregex_ai.sub('', koboldai_vars.prompt)
-
-    if(force_use_txt):
-        txt += original_txt
-
-    # Scan text for matches on WI keys
-    wimem = ""
-    found_entries = set()
-    for wi in koboldai_vars.worldinfo:
-        if(allowed_entries is not None and wi["uid"] not in allowed_entries):
-            continue
-        if(allowed_folders is not None and wi["folder"] not in allowed_folders):
-            continue
-
-        if(wi.get("constant", False)):
-            wimem = wimem + wi["content"] + "\n"
-            found_entries.add(id(wi))
-            continue
-
-        if(len(wi["key"].strip()) > 0 and (not wi.get("selective", False) or len(wi.get("keysecondary", "").strip()) > 0)):
-            # Split comma-separated keys
-            keys = wi["key"].split(",")
-            keys_secondary = wi.get("keysecondary", "").split(",")
-
-            for k in keys:
-                ky = k
-                # Remove leading/trailing spaces if the option is enabled
-                if(koboldai_vars.wirmvwhtsp):
-                    ky = k.strip()
-                if ky.lower() in txt.lower():
-                    if wi.get("selective", False) and len(keys_secondary):
-                        found = False
-                        for ks in keys_secondary:
-                            ksy = ks
-                            if(koboldai_vars.wirmvwhtsp):
-                                ksy = ks.strip()
-                            if ksy.lower() in txt.lower():
-                                wimem = wimem + wi["content"] + "\n"
-                                found_entries.add(id(wi))
-                                found = True
-                                break
-                        if found:
-                            break
-                    else:
-                        wimem = wimem + wi["content"] + "\n"
-                        found_entries.add(id(wi))
-                        break
-    
-    return wimem, found_entries
     
 #==================================================================#
 #  Commit changes to Memory storage
@@ -3893,7 +2806,7 @@ def anotesubmit(data, template=""):
 def ikrequest(txt):
     # Log request to console
     if not koboldai_vars.quiet:
-        print("{0}Len:{1}, Txt:{2}{3}".format(colors.YELLOW, len(txt), txt, colors.END))
+        print("{0}Len:{1}, Txt:{2}{3}".format(Colors.YELLOW, len(txt), txt, Colors.END))
     
     # Build request JSON data
     reqdata = {
@@ -3931,11 +2844,11 @@ def ikrequest(txt):
             assert genout is str
 
         if not koboldai_vars.quiet:
-            print("{0}{1}{2}".format(colors.CYAN, genout, colors.END))
+            print("{0}{1}{2}".format(Colors.CYAN, genout, Colors.END))
         koboldai_vars.actions.append(genout)
         update_story_chunk('last')
         emit('from_server', {'cmd': 'texteffect', 'data': koboldai_vars.actions.get_last_key() + 1 if len(koboldai_vars.actions) else 0}, broadcast=True, room="UI_1")
-        send_debug()
+        ui1_send_debug()
         set_aibusy(False)
     else:
         # Send error message to web client
@@ -4004,7 +2917,7 @@ def deletesave(name):
         emit('from_server', {'cmd': 'hidepopupdelete', 'data': ''}, room="UI_1")
         getloadlist()
     except OSError as e:
-        print("{0}{1}{2}".format(colors.RED, str(e), colors.END))
+        print("{0}{1}{2}".format(Colors.RED, str(e), Colors.END))
         emit('from_server', {'cmd': 'popuperror', 'data': str(e)}, room="UI_1")
 
 #==================================================================#
@@ -4022,7 +2935,7 @@ def renamesave(name, newname):
         with open("stories/{}.json".format(name), "r") as f:
             original_data = json.load(f)
     else:
-        print("{0}{1}{2}".format(colors.RED, "File doesn't exist to rename", colors.END))
+        print("{0}{1}{2}".format(Colors.RED, "File doesn't exist to rename", Colors.END))
         emit('from_server', {'cmd': 'popuperror', 'data': "File doesn't exist to rename"}, room="UI_1")
         return
     
@@ -4152,7 +3065,7 @@ def saveRequest(savpath, savepins=True):
         koboldai_vars.laststory = filename
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, broadcast=True, room="UI_1")
         setgamesaved(True)
-        print("{0}Story saved to {1}!{2}".format(colors.GREEN, path.basename(savpath), colors.END))
+        print("{0}Story saved to {1}!{2}".format(Colors.GREEN, path.basename(savpath), Colors.END))
 
 #==================================================================#
 #  Show list of saved stories
@@ -4376,9 +3289,9 @@ def load_story_v1(js, from_file=None):
     refresh_story()
     emit('from_server', {'cmd': 'setgamestate', 'data': 'ready'}, broadcast=True, room="UI_1")
     emit('from_server', {'cmd': 'hidegenseqs', 'data': ''}, broadcast=True, room="UI_1")
-    print("{0}Story loaded from {1}!{2}".format(colors.GREEN, filename, colors.END))
+    print("{0}Story loaded from {1}!{2}".format(Colors.GREEN, filename, Colors.END))
     
-    send_debug()
+    ui1_send_debug()
     
     if from_file is not None:
         #Save the file so we get a new V2 format, then move the save file into the proper directory
@@ -4754,45 +3667,6 @@ def final_startup():
 
     # Set the initial RNG seed
     set_seed()
-
-def send_debug():
-    if koboldai_vars.debug:
-        debug_info = ""
-        try:
-            debug_info = "{}Seed: {} ({})\n".format(debug_info, repr(__import__("tpu_mtj_backend").get_rng_seed() if koboldai_vars.use_colab_tpu else __import__("torch").initial_seed()), "specified by user in settings file" if koboldai_vars.seed_specified else "randomly generated")
-        except:
-            pass
-        try:
-            debug_info = "{}Newline Mode: {}\n".format(debug_info, koboldai_vars.newlinemode)
-        except:
-            pass
-        try:
-            debug_info = "{}Action Length: {}\n".format(debug_info, koboldai_vars.actions.get_last_key())
-        except:
-            pass
-        try:
-            debug_info = "{}Actions Metadata Length: {}\n".format(debug_info, max(koboldai_vars.actions_metadata) if len(koboldai_vars.actions_metadata) > 0 else 0)
-        except:
-            pass
-        try:
-            debug_info = "{}Actions: {}\n".format(debug_info, [k for k in koboldai_vars.actions])
-        except:
-            pass
-        try:
-            debug_info = "{}Actions Metadata: {}\n".format(debug_info, [k for k in koboldai_vars.actions_metadata])
-        except:
-            pass
-        try:
-            debug_info = "{}Last Action: {}\n".format(debug_info, koboldai_vars.actions[koboldai_vars.actions.get_last_key()])
-        except:
-            pass
-        try:
-            debug_info = "{}Last Metadata: {}\n".format(debug_info, koboldai_vars.actions_metadata[max(koboldai_vars.actions_metadata)])
-        except:
-            pass
-
-        emit('from_server', {'cmd': 'debug_info', 'data': debug_info}, broadcast=True, room="UI_1")
-
 
 #==================================================================#
 # Load file browser for soft prompts
@@ -7326,5 +6200,5 @@ else:
     patch_transformers()
     startup(command_line_backend)
     koboldai_settings.port = args.port if "port" in args and args.port is not None else 5000
-    print("{0}\nServer started in WSGI mode!{1}".format(colors.GREEN, colors.END), flush=True)
+    print("{0}\nServer started in WSGI mode!{1}".format(Colors.GREEN, Colors.END), flush=True)
     

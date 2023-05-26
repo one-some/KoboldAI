@@ -5,6 +5,14 @@
 # By: The KoboldAI Community
 #==================================================================#
 
+"""
+= THINGS TO WORRY ABOUT =
+- If anything works at all
+- Setting serialization
+
+
+"""
+
 # External packages
 from dataclasses import dataclass
 from enum import Enum
@@ -13,7 +21,9 @@ import shutil
 import eventlet
 
 from server.formatting import apply_input_formatting
-from server.state import set_aibusy
+from server.model import set_should_save_model
+from server.softprompt import load_softprompt
+from server.state import set_aibusy, ui1_toggle_memory_mode
 
 eventlet.monkey_patch(all=True, thread=False, os=False)
 import os, inspect
@@ -42,7 +52,6 @@ import datetime
 import collections
 import zipfile
 import packaging.version
-import traceback
 import markdown
 import bleach
 import functools
@@ -59,7 +68,6 @@ import html
 import argparse
 import sys
 import gc
-import traceback
 
 import lupa
 
@@ -624,24 +632,6 @@ utils.socketio = socketio
 
 # Weird import position to steal koboldai_vars from utils
 from modeling.patches import patch_transformers
-
-#Load all of the model importers
-import importlib
-model_backend_code = {}
-model_backends = {}
-for module in os.listdir("./modeling/inference_models"):
-    if not os.path.isfile(os.path.join("./modeling/inference_models",module)) and module != '__pycache__':
-        try:
-            model_backend_code[module] = importlib.import_module('modeling.inference_models.{}.class'.format(module))
-            model_backends[model_backend_code[module].model_backend_name] = model_backend_code[module].model_backend()
-            if 'disable' in vars(model_backends[model_backend_code[module].model_backend_name]):
-                if model_backends[model_backend_code[module].model_backend_name].disable:
-                    del model_backends[model_backend_code[module].model_backend_name]
-        except Exception:
-            logger.error("Model Backend {} failed to load".format(module))
-            logger.error(traceback.format_exc())
-
-logger.info("We loaded the following model backends: \n{}".format("\n".join([x for x in model_backends])))
         
 
 old_socketio_on = socketio.on
@@ -988,28 +978,6 @@ def loadmodelsettings():
             koboldai_vars.authornotetemplate = koboldai_vars.setauthornotetemplate
 
 #==================================================================#
-#  Take settings from koboldai_vars and write them to client settings file
-#==================================================================#
-def savesettings():
-     # Build json to write
-    for setting in ['model_settings', 'user_settings', 'system_settings']:
-        if setting == "model_settings":
-            filename = "settings/{}.v2_settings".format(koboldai_vars.model.replace("/", "_"))
-        else:
-            filename = "settings/{}.v2_settings".format(setting)
-        with open(filename, "w") as settings_file:
-            settings_file.write(getattr(koboldai_vars, "_{}".format(setting)).to_json())
-    
-
-#==================================================================#
-#  Don't save settings unless 2 seconds have passed without modification
-#==================================================================#
-@debounce(2)
-def settingschanged():
-    logger.info("Saving settings.")
-    savesettings()
-
-#==================================================================#
 #  Read settings from client file JSON and send to koboldai_vars
 #==================================================================#
 
@@ -1017,188 +985,6 @@ def loadsettings():
     if(path.exists("settings/" + getmodelname().replace('/', '_') + ".v2_settings")):
         with open("settings/" + getmodelname().replace('/', '_') + ".v2_settings", "r") as file:
             getattr(koboldai_vars, "_model_settings").from_json(file.read())
-        
-        
-def processsettings(js):
-# Copy file contents to vars
-    if("apikey" in js):
-        # If the model is the HORDE, then previously saved API key in settings
-        # Will always override a new key set.
-        if koboldai_vars.model != "CLUSTER" or koboldai_vars.apikey == '':
-            koboldai_vars.apikey = js["apikey"]
-    if("andepth" in js):
-        koboldai_vars.andepth = js["andepth"]
-    if("sampler_order" in js):
-        sampler_order = js["sampler_order"]
-        if(len(sampler_order) < 7):
-            sampler_order = [6] + sampler_order
-        koboldai_vars.sampler_order = sampler_order
-    if("temp" in js):
-        koboldai_vars.temp = js["temp"]
-    if("top_p" in js):
-        koboldai_vars.top_p = js["top_p"]
-    if("top_k" in js):
-        koboldai_vars.top_k = js["top_k"]
-    if("tfs" in js):
-        koboldai_vars.tfs = js["tfs"]
-    if("typical" in js):
-        koboldai_vars.typical = js["typical"]
-    if("top_a" in js):
-        koboldai_vars.top_a = js["top_a"]
-    if("rep_pen" in js):
-        koboldai_vars.rep_pen = js["rep_pen"]
-    if("rep_pen_slope" in js):
-        koboldai_vars.rep_pen_slope = js["rep_pen_slope"]
-    if("rep_pen_range" in js):
-        koboldai_vars.rep_pen_range = js["rep_pen_range"]
-    if("genamt" in js):
-        koboldai_vars.genamt = js["genamt"]
-    if("max_length" in js):
-        koboldai_vars.max_length = js["max_length"]
-    if("ikgen" in js):
-        koboldai_vars.ikgen = js["ikgen"]
-    if("formatoptns" in js):
-        koboldai_vars.formatoptns = js["formatoptns"]
-    if("numseqs" in js):
-        koboldai_vars.numseqs = js["numseqs"]
-    if("widepth" in js):
-        koboldai_vars.widepth = js["widepth"]
-    if("useprompt" in js):
-        koboldai_vars.useprompt = js["useprompt"]
-    if("adventure" in js):
-        koboldai_vars.adventure = js["adventure"]
-    if("chatmode" in js):
-        koboldai_vars.chatmode = js["chatmode"]
-    if("chatname" in js):
-        koboldai_vars.chatname = js["chatname"]
-    if("botname" in js):
-        koboldai_vars.botname = js["botname"]
-    if("dynamicscan" in js):
-        koboldai_vars.dynamicscan = js["dynamicscan"]
-    if("nopromptgen" in js):
-        koboldai_vars.nopromptgen = js["nopromptgen"]
-    if("rngpersist" in js):
-        koboldai_vars.rngpersist = js["rngpersist"]
-    if("nogenmod" in js):
-        koboldai_vars.nogenmod = js["nogenmod"]
-    if("fulldeterminism" in js):
-        koboldai_vars.full_determinism = js["fulldeterminism"]
-    if("stop_sequence" in js):
-        koboldai_vars.stop_sequence = js["stop_sequence"]
-    if("autosave" in js):
-        koboldai_vars.autosave = js["autosave"]
-    if("newlinemode" in js):
-        koboldai_vars.newlinemode = js["newlinemode"]
-    if("welcome" in js):
-        koboldai_vars.welcome = js["welcome"]
-    if("output_streaming" in js):
-        koboldai_vars.output_streaming = js["output_streaming"]
-    if("show_probs" in js):
-        koboldai_vars.show_probs = js["show_probs"]
-    if("show_budget" in js):
-        koboldai_vars.show_budget = js["show_budget"]
-    
-    if("seed" in js):
-        koboldai_vars.seed = js["seed"]
-        if(koboldai_vars.seed is not None):
-            koboldai_vars.seed_specified = True
-        else:
-            koboldai_vars.seed_specified = False
-    else:
-        koboldai_vars.seed_specified = False
-
-    if("antemplate" in js):
-        koboldai_vars.setauthornotetemplate = js["antemplate"]
-        if(not koboldai_vars.gamestarted):
-            koboldai_vars.authornotetemplate = koboldai_vars.setauthornotetemplate
-    
-    if("userscripts" in js):
-        koboldai_vars.userscripts = []
-        for userscript in js["userscripts"]:
-            if type(userscript) is not str:
-                continue
-            userscript = userscript.strip()
-            if len(userscript) != 0 and all(q not in userscript for q in ("..", ":")) and all(userscript[0] not in q for q in ("/", "\\")) and os.path.exists(fileops.uspath(userscript)):
-                koboldai_vars.userscripts.append(userscript)
-
-    if("corescript" in js and type(js["corescript"]) is str and all(q not in js["corescript"] for q in ("..", ":")) and all(js["corescript"][0] not in q for q in ("/", "\\"))):
-        koboldai_vars.corescript = js["corescript"]
-    else:
-        koboldai_vars.corescript = "default.lua"
-
-#==================================================================#
-#  Load a soft prompt from a file
-#==================================================================#
-
-#def check_for_sp_change():
-#    while(True):
-#        time.sleep(0.05)
-#
-#        if(koboldai_vars.sp_changed):
-#            with app.app_context():
-#                emit('from_server', {'cmd': 'spstatitems', 'data': {koboldai_vars.spfilename: koboldai_vars.spmeta} if koboldai_vars.allowsp and len(koboldai_vars.spfilename) else {}}, namespace=None, broadcast=True, room="UI_1")
-#            koboldai_vars.sp_changed = False
-
-
-#socketio.start_background_task(check_for_sp_change)
-
-def spRequest(filename):
-    if(not koboldai_vars.allowsp):
-        raise RuntimeError("Soft prompts are not supported by your current model/backend")
-    
-    old_filename = koboldai_vars.spfilename
-
-    koboldai_vars.spfilename = ""
-    settingschanged()
-
-    if(len(filename) == 0):
-        koboldai_vars.sp = None
-        koboldai_vars.sp_length = 0
-        if(old_filename != filename):
-            koboldai_vars.sp_changed = True
-        return
-
-    z, version, shape, fortran_order, dtype = fileops.checksp("./softprompts/"+filename, koboldai_vars.modeldim)
-    if not isinstance(z, zipfile.ZipFile):
-        raise RuntimeError(f"{repr(filename)} is not a valid soft prompt file")
-    with z.open('meta.json') as f:
-        koboldai_vars.spmeta = json.load(f)
-        koboldai_vars.spname = koboldai_vars.spmeta['name']
-    z.close()
-
-    with np.load(fileops.sppath(filename), allow_pickle=False) as f:
-        tensor = f['tensor.npy']
-
-    # If the tensor is in bfloat16 format, convert it to float32
-    if(tensor.dtype == 'V2'):
-        tensor.dtype = np.uint16
-        tensor = np.uint32(tensor) << 16
-        tensor.dtype = np.float32
-
-    if(tensor.dtype != np.float16):
-        tensor = np.float32(tensor)
-    assert not np.isinf(tensor).any() and not np.isnan(tensor).any()
-
-    koboldai_vars.sp_length = tensor.shape[-2]
-    koboldai_vars.spmeta["n_tokens"] = koboldai_vars.sp_length
-
-    if(koboldai_vars.use_colab_tpu or koboldai_vars.model in ("TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX")):
-        rows = tensor.shape[0]
-        padding_amount = tpu_mtj_backend.params["seq"] - (tpu_mtj_backend.params["seq"] % -tpu_mtj_backend.params["cores_per_replica"]) - rows
-        tensor = np.pad(tensor, ((0, padding_amount), (0, 0)))
-        tensor = tensor.reshape(
-            tpu_mtj_backend.params["cores_per_replica"],
-            -1,
-            tpu_mtj_backend.params.get("d_embed", tpu_mtj_backend.params["d_model"]),
-        )
-        koboldai_vars.sp = tpu_mtj_backend.shard_xmap(np.float32(tensor))
-    else:
-        koboldai_vars.sp = torch.from_numpy(tensor)
-
-    koboldai_vars.spfilename = filename
-    settingschanged()
-    if(old_filename != filename):
-            koboldai_vars.sp_changed = True
 
 #==================================================================#
 # Startup
@@ -1275,6 +1061,8 @@ def general_startup(override_args=None):
         args = parser.parse_args()
     
     utils.args = args
+
+    set_should_save_model(not (args.colab or args.cacheonly) or args.savemodel)
 
 
 
@@ -1465,186 +1253,6 @@ def general_startup(override_args=None):
         
     
         
-    
-def unload_model():
-    global model
-    global generator
-    global model_config
-    global tokenizer
-    
-    #We need to wipe out the existing model and refresh the cuda cache
-    model = None
-    generator = None
-    model_config = None
-    koboldai_vars.online_model = ''
-    with torch.no_grad():
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="torch.distributed.reduce_op is deprecated")
-            for tensor in gc.get_objects():
-                try:
-                    if torch.is_tensor(tensor):
-                        tensor.set_(torch.tensor((), device=tensor.device, dtype=tensor.dtype))
-                except:
-                    pass
-    gc.collect()
-    try:
-        with torch.no_grad():
-            torch.cuda.empty_cache()
-    except:
-        pass
-        
-    #Reload our badwords
-    koboldai_vars.badwordsids = koboldai_settings.badwordsids_default
-    
-    
-def load_model(model_backend, initial_load=False):
-    global model
-    global tokenizer
-    global model_config
-
-    koboldai_vars.aibusy = True
-    koboldai_vars.horde_share = False
-
-    if initial_load:
-        use_breakmodel_args = True
-
-    koboldai_vars.reset_model()
-
-    koboldai_vars.noai = False
-    set_aibusy(True)
-    if koboldai_vars.model != 'ReadOnly':
-        emit('from_server', {'cmd': 'model_load_status', 'data': "Loading {}".format(model_backends[model_backend].model_name if "model_name" in vars(model_backends[model_backend]) else model_backends[model_backend].id)}, broadcast=True)
-        #Have to add a sleep so the server will send the emit for some reason
-        time.sleep(0.1)
-
-    if 'model' in globals():
-        model.unload()
-    
-    
-    # If transformers model was selected & GPU available, ask to use CPU or GPU
-    if(not koboldai_vars.use_colab_tpu and koboldai_vars.model not in ["InferKit", "Colab", "API", "CLUSTER", "OAI", "GooseAI" , "ReadOnly", "TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX"]):
-        # loadmodelsettings()
-        # loadsettings()
-        logger.init("GPU support", status="Searching")
-        koboldai_vars.bmsupported = ((koboldai_vars.model_type != 'gpt2') or koboldai_vars.model_type in ("gpt_neo", "gptj", "xglm", "opt")) and not koboldai_vars.nobreakmodel
-        if(koboldai_vars.hascuda):
-            logger.init_ok("GPU support", status="Found")
-        else:
-            logger.init_warn("GPU support", status="Not Found")
-        
-        #if koboldai_vars.hascuda:
-        #    if(koboldai_vars.bmsupported):
-        #        koboldai_vars.usegpu = False
-        #        koboldai_vars.breakmodel = True
-        #    else:
-        #        koboldai_vars.breakmodel = False
-        #        koboldai_vars.usegpu = use_gpu
-    else:
-        koboldai_vars.default_preset = koboldai_settings.default_preset
-
-                    
-    model = model_backends[model_backend]
-    model.load(initial_load=initial_load, save_model=not (args.colab or args.cacheonly) or args.savemodel)
-    koboldai_vars.model = model.model_name if "model_name" in vars(model) else model.id #Should have model_name, but it could be set to id depending on how it's setup
-    logger.debug("Model Type: {}".format(koboldai_vars.model_type))
-    
-    # TODO: Convert everywhere to use model.tokenizer
-    if model:
-        tokenizer = model.tokenizer
-
-    loadmodelsettings()
-    loadsettings()
-
-    lua_startup()
-    # Load scripts
-    load_lua_scripts()
-    
-    final_startup()
-    #if not initial_load:
-    set_aibusy(False)
-    socketio.emit('from_server', {'cmd': 'hide_model_name'}, broadcast=True, room="UI_1")
-    time.sleep(0.1)
-        
-    if not koboldai_vars.gamestarted:
-        setStartState()
-        sendsettings()
-        refresh_settings()
-    
-    #Saving the tokenizer to the KoboldStoryRegister class so we can do token counting on the story data
-    if 'tokenizer' in [x for x in globals()]:
-        koboldai_vars.tokenizer = tokenizer
-    
-    #Let's load the presets
-    preset_same_model = {}
-    preset_same_class_size = {}
-    preset_same_class = {}
-    preset_others = {}
-    model_info_data = model_info()
-    
-    for file in os.listdir("./presets"):
-        if file[-8:] == '.presets':
-            with open("./presets/{}".format(file)) as f:
-                data = json.load(f)
-                if not isinstance(data, list):
-                    data = [data]
-            for preset in data:
-                if preset['Model Name'] == koboldai_vars.model:
-                    preset_same_model[preset['preset']] = preset
-                    preset_same_model[preset['preset']]['Match'] = "Recommended"
-                elif not (preset['preset'] in preset_same_model and preset_same_model[preset['preset']]['Match'] == "Recommended") and model_info_data['Model Type'] == preset['Model Type'] and model_info_data['Model Size'] == preset['Model Size']:
-                    preset_same_class_size[preset['preset']] = preset
-                    preset_same_class_size[preset['preset']]['Match'] = "Recommended"
-                elif not (preset['preset'] in preset_same_model and preset_same_model[preset['preset']]['Match'] == "Recommended") and not ((preset['preset'] in preset_same_class_size and preset_same_class_size[preset['preset']]['Match'] == "Recommended")) and model_info_data['Model Type'] == preset['Model Type']:
-                    preset_same_class[preset['preset']] = preset
-                    preset_same_class[preset['preset']]['Match'] = "Same Class"
-                elif preset['preset'] not in preset_same_model and preset['preset'] not in preset_same_class_size and preset['preset'] not in preset_same_class:
-                    preset_others[preset['preset']] = preset
-                    preset_others[preset['preset']]['Match'] = "Other"
-    
-    #Combine it all
-    presets = preset_same_model
-    for item in preset_same_class_size:
-        if item not in presets:
-            presets[item] = preset_same_class_size[item]
-    for item in preset_same_class:
-        if item not in presets:
-            presets[item] = preset_same_class[item]
-    for item in preset_others:
-        if item not in presets:
-            presets[item] = preset_others[item]
-    
-    presets['Default'] = koboldai_vars.default_preset
-    
-    koboldai_vars.uid_presets = presets
-    #We want our data to be a 2 deep dict. Top level is "Recommended", "Same Class", "Model 1", "Model 2", etc
-    #Next layer is "Official", "Custom"
-    #Then the preset name
-    
-    to_use = OrderedDict()
-    
-    to_use["Recommended"] = {
-        "Official": [presets[x] for x in presets if presets[x]['Match'] == "Recommended" and presets[x]['Preset Category'] == "Official"], 
-        "Custom": [presets[x] for x in presets if presets[x]['Match'] == "Recommended" and presets[x]['Preset Category'] == "Custom"], 
-    }
-    to_use["Same Class"] = {
-        "Official": [presets[x] for x in presets if presets[x]['Match'] == "Same Class" and presets[x]['Preset Category'] == "Official"], 
-        "Custom": [presets[x] for x in presets if presets[x]['Match'] == "Same Class" and presets[x]['Preset Category'] == "Custom"], 
-    }
-    to_use["Other"] = {
-    "Official": [presets[x] for x in presets if presets[x]['Match'] == "Other" and presets[x]['Preset Category'] == "Official"], 
-    "Custom": [presets[x] for x in presets if presets[x]['Match'] == "Other" and presets[x]['Preset Category'] == "Custom"], 
-    }
-    koboldai_vars.presets = to_use
-
-    
-    koboldai_vars.aibusy = False
-    if not os.path.exists("./softprompts"):
-        os.mkdir("./softprompts")
-    koboldai_vars.splist = [[f, get_softprompt_desc(os.path.join("./softprompts", f),None,True)] for f in os.listdir("./softprompts") if os.path.isfile(os.path.join("./softprompts", f)) and valid_softprompt(os.path.join("./softprompts", f))]
-    if initial_load and koboldai_vars.cloudflare_link != "":
-        print(format(colors.GREEN) + "KoboldAI has finished loading and is available at the following link for UI 1: " + koboldai_vars.cloudflare_link + format(colors.END))
-        print(format(colors.GREEN) + "KoboldAI has finished loading and is available at the following link for UI 2: " + koboldai_vars.cloudflare_link + "/new_ui" + format(colors.END))
-
 
 # Setup IP Whitelisting
 # Define a function to check if IP is allowed
@@ -2294,7 +1902,7 @@ def lua_set_spfilename(filename: Union[str, None]):
     filename = str(filename).strip()
     changed = lua_get_spfilename() != filename
     assert all(q not in filename for q in ("/", "\\"))
-    spRequest(filename)
+    load_softprompt(filename)
     return changed
 
 #==================================================================#
@@ -2490,7 +2098,7 @@ def get_message(msg):
     elif(msg['cmd'] == 'delete'):
         deleterequest()
     elif(msg['cmd'] == 'memory'):
-        togglememorymode()
+        ui1_toggle_memory_mode()
     #elif(not koboldai_vars.host and msg['cmd'] == 'savetofile'):
     #    savetofile()
     elif(not koboldai_vars.host and msg['cmd'] == 'loadfromfile'):
@@ -2815,7 +2423,7 @@ def get_message(msg):
     elif(msg['cmd'] == 'loadrequest'):
         loadRequest(fileops.storypath(koboldai_vars.loadselect))
     elif(msg['cmd'] == 'sprequest'):
-        spRequest(koboldai_vars.spselect)
+        load_softprompt(koboldai_vars.spselect)
     elif(msg['cmd'] == 'deletestory'):
         deletesave(msg['data'])
     elif(msg['cmd'] == 'renamestory'):
@@ -3949,20 +3557,6 @@ def inlinedelete(chunk):
         remove_story_chunk(chunk)
         emit('from_server', {'cmd': 'editmode', 'data': 'false'}, broadcast=True, room="UI_1")
     send_debug()
-
-#==================================================================#
-#   Toggles the game mode for memory editing and sends UI commands
-#==================================================================#
-def togglememorymode():
-    if(koboldai_vars.mode == "play"):
-        koboldai_vars.mode = "memory"
-        emit('from_server', {'cmd': 'memmode', 'data': 'true'}, broadcast=True, room="UI_1")
-        emit('from_server', {'cmd': 'setinputtext', 'data': koboldai_vars.memory}, broadcast=True, room="UI_1")
-        emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, broadcast=True, room="UI_1")
-        emit('from_server', {'cmd': 'setanotetemplate', 'data': koboldai_vars.authornotetemplate}, broadcast=True, room="UI_1")
-    elif(koboldai_vars.mode == "memory"):
-        koboldai_vars.mode = "play"
-        emit('from_server', {'cmd': 'memmode', 'data': 'false'}, broadcast=True, room="UI_1")
 
 #==================================================================#
 #   Toggles the game mode for WI editing and sends UI commands
@@ -5149,7 +4743,7 @@ def final_startup():
         js   = json.load(file)
         if(koboldai_vars.allowsp and "softprompt" in js and type(js["softprompt"]) is str and all(q not in js["softprompt"] for q in ("..", ":")) and (len(js["softprompt"]) != 0 and all(js["softprompt"][0] not in q for q in ("/", "\\")))):
             if valid_softprompt("softprompts/"+js["softprompt"]):
-                spRequest(js["softprompt"])
+                load_softprompt(js["softprompt"])
         else:
             koboldai_vars.spfilename = ""
         file.close()
@@ -6493,27 +6087,6 @@ def UI_2_load_softprompt_list(data):
                                                                   column_names=['Softprompt Name', 'Softprompt Description'],
                                                                   show_filename=False,
                                                                   column_widths=['150px', 'auto'])
-
-@logger.catch
-def valid_softprompt(file):
-    z, version, shape, fortran_order, dtype = fileops.checksp(file, koboldai_vars.modeldim)
-    if z in [1, 2, 3, 4]:
-        return False
-    elif not isinstance(z, zipfile.ZipFile):
-        print("not zip")
-        return False
-    else:
-        return True
-
-@logger.catch
-def get_softprompt_desc(item_full_path, item, valid_selection):
-    if not valid_selection:
-        return [None, None]
-    z = zipfile.ZipFile(item_full_path)
-    with z.open('meta.json') as f:
-        ob = json.load(f)
-        return [ob['name'], ob['description']]
-
 #==================================================================#
 # Event triggered when Softprompt is loaded
 #==================================================================#
@@ -6522,7 +6095,7 @@ def get_softprompt_desc(item_full_path, item, valid_selection):
 def UI_2_load_softprompt(data):
     if koboldai_vars.debug:
         print("Load softprompt: {}".format(data))
-    spRequest(data)
+    load_softprompt(data)
 
 #==================================================================#
 # Event triggered when load userscripts is clicked

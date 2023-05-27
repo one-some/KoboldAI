@@ -22,7 +22,8 @@ import shutil
 import eventlet
 
 from server.formatting import apply_input_formatting
-from server.model import set_should_save_model
+from server.lua import load_lua_scripts
+from server.model import load_model, set_should_save_model
 from server.softprompt import load_softprompt
 from server.state import set_aibusy, set_gamesaved, ui1_toggle_memory_mode, ui1_send_debug
 from server.wi import ui1_send_wi
@@ -1254,7 +1255,6 @@ def do_connect():
     if(not koboldai_vars.gamestarted):
         setStartState()
         sendsettings()
-        refresh_settings()
         koboldai_vars.laststory = None
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, room="UI_1")
         ui1_send_wi()
@@ -1265,7 +1265,6 @@ def do_connect():
         # Game in session, send current game data and ready state to browser
         refresh_story()
         sendsettings()
-        refresh_settings()
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, room="UI_1")
         ui1_send_wi()
         emit('from_server', {'cmd': 'setmemory', 'data': koboldai_vars.memory}, room="UI_1")
@@ -1305,7 +1304,6 @@ def get_message(msg):
                     raise ValueError("Chatname must be a string")
                 koboldai_vars.chatname = msg['chatname']
                 koboldai_vars.botname = msg['botname']
-                settingschanged()
                 emit('from_server', {'cmd': 'setchatname', 'data': koboldai_vars.chatname}, room="UI_1")
                 emit('from_server', {'cmd': 'setbotname', 'data': koboldai_vars.botname}, room="UI_1")
             koboldai_vars.recentrng = koboldai_vars.recentrngm = None
@@ -1326,7 +1324,6 @@ def get_message(msg):
                 raise ValueError("Chatname must be a string")
             koboldai_vars.chatname = msg['chatname']
             koboldai_vars.botname = msg['botname']
-            settingschanged()
             emit('from_server', {'cmd': 'setchatname', 'data': koboldai_vars.chatname}, room="UI_1")
             emit('from_server', {'cmd': 'setbotname', 'data': koboldai_vars.botname}, room="UI_1")
         actionretry(msg['data'])
@@ -1372,63 +1369,39 @@ def get_message(msg):
     elif(msg['cmd'] == 'settemp'):
         koboldai_vars.temp = float(msg['data'])
         emit('from_server', {'cmd': 'setlabeltemp', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'settopp'):
         koboldai_vars.top_p = float(msg['data'])
         emit('from_server', {'cmd': 'setlabeltopp', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'settopk'):
         koboldai_vars.top_k = int(msg['data'])
         emit('from_server', {'cmd': 'setlabeltopk', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'settfs'):
         koboldai_vars.tfs = float(msg['data'])
         emit('from_server', {'cmd': 'setlabeltfs', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'settypical'):
         koboldai_vars.typical = float(msg['data'])
         emit('from_server', {'cmd': 'setlabeltypical', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'settopa'):
         koboldai_vars.top_a = float(msg['data'])
         emit('from_server', {'cmd': 'setlabeltopa', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setreppen'):
         koboldai_vars.rep_pen = float(msg['data'])
         emit('from_server', {'cmd': 'setlabelreppen', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setreppenslope'):
         koboldai_vars.rep_pen_slope = float(msg['data'])
         emit('from_server', {'cmd': 'setlabelreppenslope', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setreppenrange'):
         koboldai_vars.rep_pen_range = float(msg['data'])
         emit('from_server', {'cmd': 'setlabelreppenrange', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setoutput'):
         koboldai_vars.genamt = int(msg['data'])
         emit('from_server', {'cmd': 'setlabeloutput', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'settknmax'):
         koboldai_vars.max_length = int(msg['data'])
         emit('from_server', {'cmd': 'setlabeltknmax', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setikgen'):
         koboldai_vars.ikgen = int(msg['data'])
         emit('from_server', {'cmd': 'setlabelikgen', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     # Author's Note field update
     elif(msg['cmd'] == 'anote'):
         anotesubmit(msg['data'], template=msg['template'])
@@ -1436,29 +1409,17 @@ def get_message(msg):
     elif(msg['cmd'] == 'anotedepth'):
         koboldai_vars.andepth = int(msg['data'])
         emit('from_server', {'cmd': 'setlabelanotedepth', 'data': msg['data']}, broadcast=True, room="UI_1")
-        settingschanged()
-        refresh_settings()
     # Format - Trim incomplete sentences
     elif(msg['cmd'] == 'frmttriminc'):
         koboldai_vars.frmttriminc = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'frmtrmblln'):
         koboldai_vars.frmtrmblln = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'frmtrmspch'):
         koboldai_vars.frmtrmspch = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'frmtadsnsp'):
         koboldai_vars.frmtadsnsp = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'singleline'):
         koboldai_vars.singleline = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'importselect'):
         koboldai_vars.importnum = int(msg["data"].replace("import", ""))
     elif(msg['cmd'] == 'importcancel'):
@@ -1557,7 +1518,6 @@ def get_message(msg):
             userscript = userscript.strip()
             if len(userscript) != 0 and all(q not in userscript for q in ("..", ":")) and all(userscript[0] not in q for q in ("/", "\\")) and os.path.exists(fileops.uspath(userscript)):
                 koboldai_vars.userscripts.append(userscript)
-        settingschanged()
     elif(msg['cmd'] == 'usload'):
         load_lua_scripts()
         unloaded, loaded = getuslist()
@@ -1575,7 +1535,6 @@ def get_message(msg):
         if(min(sampler_order) != 0 or max(sampler_order) != len(sampler_order) - 1 or len(set(sampler_order)) != len(sampler_order)):
             raise ValueError(f"Sampler order list of length {len(sampler_order)} must be a permutation of the first {len(sampler_order)} nonnegative integers")
         koboldai_vars.sampler_order = sampler_order
-        settingschanged()
     elif(msg['cmd'] == 'list_model'):
         sendModelSelection(menu=msg['data'])
     elif(msg['cmd'] == 'load_model'):
@@ -1696,71 +1655,39 @@ def get_message(msg):
     elif(msg['cmd'] == 'setnumseq'):
         koboldai_vars.numseqs = int(msg['data'])
         emit('from_server', {'cmd': 'setlabelnumseq', 'data': msg['data']}, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setwidepth'):
         koboldai_vars.widepth = int(msg['data'])
         emit('from_server', {'cmd': 'setlabelwidepth', 'data': msg['data']}, room="UI_1")
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setuseprompt'):
         koboldai_vars.useprompt = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setadventure'):
         koboldai_vars.adventure = msg['data']
         koboldai_vars.chatmode = False
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'autosave'):
         koboldai_vars.autosave = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setchatmode'):
         koboldai_vars.chatmode = msg['data']
         koboldai_vars.adventure = False
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setdynamicscan'):
         koboldai_vars.dynamicscan = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setnopromptgen'):
         koboldai_vars.nopromptgen = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setrngpersist'):
         koboldai_vars.rngpersist = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setnogenmod'):
         koboldai_vars.nogenmod = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setfulldeterminism'):
         koboldai_vars.full_determinism = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setoutputstreaming'):
         koboldai_vars.output_streaming = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setshowbudget'):
         koboldai_vars.show_budget = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'setshowprobs'):
         koboldai_vars.show_probs = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'alttextgen'):
         koboldai_vars.alt_gen = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(msg['cmd'] == 'alt_multi_gen'):
         koboldai_vars.alt_multi_gen = msg['data']
-        settingschanged()
-        refresh_settings()
     elif(not koboldai_vars.host and msg['cmd'] == 'importwi'):
         wiimportrequest()
     elif(msg['cmd'] == 'debug'):
@@ -2625,7 +2552,6 @@ def anotesubmit(data, template=""):
 
     if(koboldai_vars.authornotetemplate != template):
         koboldai_vars.setauthornotetemplate = template
-        settingschanged()
     koboldai_vars.authornotetemplate = template
 
     emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, broadcast=True, room="UI_1")

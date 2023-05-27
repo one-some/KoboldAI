@@ -4,6 +4,7 @@ import lupa
 from eventlet import tpool
 from typing import Callable, TypeVar
 from server.chunks import inline_delete, inline_edit
+from server.wi import ui1_send_wi
 
 import utils
 import fileops
@@ -294,7 +295,7 @@ def lua_set_attr(uid, k, v):
         + Colors.END
     )
     koboldai_vars.sync_worldinfo_v1_to_v2()
-    sendwi()
+    ui1_send_wi()
 
 
 # ==================================================================#
@@ -324,7 +325,7 @@ def lua_folder_set_attr(uid, k, v):
         + Colors.END
     )
     koboldai_vars.sync_worldinfo_v1_to_v2()
-    sendwi()
+    ui1_send_wi()
 
 
 # ==================================================================#
@@ -626,9 +627,7 @@ def lua_set_authorsnotetemplate(m):
 # ==================================================================#
 @bridged_kwarg()
 def lua_resend_settings():
-    print("lua_resend_settings")
-    settingschanged()
-    refresh_settings()
+    print("lua_resend_settings -- this probably does nothing")
 
 
 # ==================================================================#

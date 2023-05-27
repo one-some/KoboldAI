@@ -38,59 +38,80 @@ def clean_var_for_emit(value):
 
 def process_variable_changes(socketio, classname, name, value, old_value, debug_message=None):
     global multi_story
-    if serverstarted and name != "serverstarted":
-        transmit_time = str(datetime.datetime.now())
-        if debug_message is not None:
-            print("{} {}: {} changed from {} to {}".format(debug_message, classname, name, old_value, value))
-        if value != old_value:
-            #Get which room we'll send the messages to
-            if multi_story:
-                if classname != 'story':
-                    room = 'UI_2'
-                else:
-                    if has_request_context():
-                        room = 'default' if 'story' not in session else session['story']
-                    else:
-                        logger.error("We tried to access the story register outside of an http context. Will not work in multi-story mode")
-                        return
+
+    ui1_command = "update" + ({
+        # Special overrides
+        "genamt": "outlen",
+        "max_length": "tknmax",
+        "numseqs": "numseq",
+        "andepth": "anotedepth",
+        "alt_gen": "alt_text_gen",
+    }.get(name) or name.replace("_", ""))
+
+    if not (serverstarted and name != "serverstarted"):
+        return
+
+    transmit_time = str(datetime.datetime.now())
+    if debug_message is not None:
+        print("{} {}: {} changed from {} to {}".format(debug_message, classname, name, old_value, value))
+    if value != old_value:
+        #Get which room we'll send the messages to
+        if multi_story:
+            if classname != 'story':
+                room = 'UI_2'
             else:
-                room = "UI_2"
-            #logger.debug("sending data to room (multi_story={},classname={}): {}".format(multi_story, classname, room))
-            #Special Case for KoboldStoryRegister
-            if isinstance(value, KoboldStoryRegister):
-                #To speed up loading time we will only transmit the last 100 actions to the UI, then rely on scrolling triggers to load more as needed
-                if not has_request_context():
-                    if queue is not None:
-                        #logger.debug("Had to use queue")
-                        queue.put(["var_changed", {"classname": "actions", "name": "Action Count", "old_value": None, "value":value.action_count, "transmit_time": transmit_time}, {"broadcast":True, "room":room}])
-                        
-                        data_to_send = []
-                        for i in list(value.actions)[-100:]:
-                            data_to_send.append({"id": i, "action": value.actions[i]})
-                        queue.put(["var_changed", {"classname": "story", "name": "actions", "old_value": None, "value":data_to_send, "transmit_time": transmit_time}, {"broadcast":True, "room":room}])
-                
+                if has_request_context():
+                    room = 'default' if 'story' not in session else session['story']
                 else:
-                    if socketio is not None:
-                        socketio.emit("var_changed", {"classname": "actions", "name": "Action Count", "old_value": None, "value":value.action_count, "transmit_time": transmit_time}, broadcast=True, room=room)
+                    logger.error("We tried to access the story register outside of an http context. Will not work in multi-story mode")
+                    return
+        else:
+            room = "UI_2"
+
+            # Basic UI1 sync hacks
+            socketio.emit(
+                "from_server",
+                {"cmd": ui1_command, "data": value},
+                broadcast=True,
+                room="UI_1"
+            )
+
+        #logger.debug("sending data to room (multi_story={},classname={}): {}".format(multi_story, classname, room))
+        #Special Case for KoboldStoryRegister
+        if isinstance(value, KoboldStoryRegister):
+            #To speed up loading time we will only transmit the last 100 actions to the UI, then rely on scrolling triggers to load more as needed
+            if not has_request_context():
+                if queue is not None:
+                    #logger.debug("Had to use queue")
+                    queue.put(["var_changed", {"classname": "actions", "name": "Action Count", "old_value": None, "value":value.action_count, "transmit_time": transmit_time}, {"broadcast":True, "room":room}])
                     
                     data_to_send = []
                     for i in list(value.actions)[-100:]:
                         data_to_send.append({"id": i, "action": value.actions[i]})
-                    if socketio is not None:
-                        socketio.emit("var_changed", {"classname": "story", "name": "actions", "old_value": None, "value": data_to_send, "transmit_time": transmit_time}, broadcast=True, room=room)
-            elif isinstance(value, KoboldWorldInfo):
-                value.send_to_ui()
+                    queue.put(["var_changed", {"classname": "story", "name": "actions", "old_value": None, "value":data_to_send, "transmit_time": transmit_time}, {"broadcast":True, "room":room}])
+            
             else:
-                #If we got a variable change from a thread other than what the app is run it, eventlet seems to block and no further messages are sent. Instead, we'll rely the message to the app and have the main thread send it
-                if not has_request_context():
-                    data = ["var_changed", {"classname": classname, "name": name, "old_value": clean_var_for_emit(old_value), "value": clean_var_for_emit(value), "transmit_time": transmit_time}, {"include_self":True, "broadcast":True, "room":room}]
-                    if queue is not None:
-                        #logger.debug("Had to use queue")
-                        queue.put(data)
-                        
-                else:
-                    if socketio is not None:
-                        socketio.emit("var_changed", {"classname": classname, "name": name, "old_value": clean_var_for_emit(old_value), "value": clean_var_for_emit(value), "transmit_time": transmit_time}, include_self=True, broadcast=True, room=room)
+                if socketio is not None:
+                    socketio.emit("var_changed", {"classname": "actions", "name": "Action Count", "old_value": None, "value":value.action_count, "transmit_time": transmit_time}, broadcast=True, room=room)
+                
+                data_to_send = []
+                for i in list(value.actions)[-100:]:
+                    data_to_send.append({"id": i, "action": value.actions[i]})
+                if socketio is not None:
+                    socketio.emit("var_changed", {"classname": "story", "name": "actions", "old_value": None, "value": data_to_send, "transmit_time": transmit_time}, broadcast=True, room=room)
+        elif isinstance(value, KoboldWorldInfo):
+            value.send_to_ui()
+        else:
+            #If we got a variable change from a thread other than what the app is run it, eventlet seems to block and no further messages are sent. Instead, we'll rely the message to the app and have the main thread send it
+            if not has_request_context():
+                data = ["var_changed", {"classname": classname, "name": name, "old_value": clean_var_for_emit(old_value), "value": clean_var_for_emit(value), "transmit_time": transmit_time}, {"include_self":True, "broadcast":True, "room":room}]
+                if queue is not None:
+                    #logger.debug("Had to use queue")
+                    queue.put(data)
+                    
+            else:
+                if socketio is not None:
+                    socketio.emit("var_changed", {"classname": classname, "name": name, "old_value": clean_var_for_emit(old_value), "value": clean_var_for_emit(value), "transmit_time": transmit_time}, include_self=True, broadcast=True, room=room)
 
 class koboldai_vars(object):
     def __init__(self, socketio):

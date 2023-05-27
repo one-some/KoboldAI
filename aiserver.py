@@ -11,6 +11,7 @@
 - Setting serialization
 - Being a little less lousy with type annotations on non-ui1 stuff. ui1 stuff
   is kinda whatever since it'll be removed at some point anyway
+- make all the big comment things #=====# normal docstrings for ide support
 """
 
 # External packages
@@ -23,7 +24,8 @@ import eventlet
 from server.formatting import apply_input_formatting
 from server.model import set_should_save_model
 from server.softprompt import load_softprompt
-from server.state import set_aibusy, ui1_toggle_memory_mode, ui1_send_debug
+from server.state import set_aibusy, set_gamesaved, ui1_toggle_memory_mode, ui1_send_debug
+from server.wi import ui1_send_wi
 
 eventlet.monkey_patch(all=True, thread=False, os=False)
 import os, inspect
@@ -51,20 +53,14 @@ import ijson
 import datetime
 import collections
 import zipfile
-import packaging.version
-import markdown
-import bleach
 import functools
 import traceback
 import inspect
-import warnings
 import multiprocessing
 import numpy as np
-from collections import OrderedDict
 from typing import Any, Callable, TypeVar, Tuple, Union, Dict, Set, List, Optional, Type
 
 import requests
-import html
 import argparse
 import sys
 import gc
@@ -74,7 +70,6 @@ import lupa
 # KoboldAI
 import fileops
 import gensettings
-from utils import debounce
 import utils
 import koboldai_settings
 import torch
@@ -82,10 +77,6 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, AutoModelForToken
 import transformers
 import ipaddress
 from functools import wraps
-try:
-    from transformers.models.opt.modeling_opt import OPTDecoder
-except:
-    pass
 
 # Text2img
 import base64
@@ -564,8 +555,8 @@ class ImportBuffer:
         
         # Refresh game screen
         koboldai_vars.laststory = None
-        setgamesaved(False)
-        sendwi()
+        set_gamesaved(False)
+        ui1_send_wi()
         refresh_story()
 
 import_buffer = ImportBuffer()
@@ -1266,7 +1257,7 @@ def do_connect():
         refresh_settings()
         koboldai_vars.laststory = None
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, room="UI_1")
-        sendwi()
+        ui1_send_wi()
         emit('from_server', {'cmd': 'setmemory', 'data': koboldai_vars.memory}, room="UI_1")
         emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, room="UI_1")
         koboldai_vars.mode = "play"
@@ -1276,7 +1267,7 @@ def do_connect():
         sendsettings()
         refresh_settings()
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, room="UI_1")
-        sendwi()
+        ui1_send_wi()
         emit('from_server', {'cmd': 'setmemory', 'data': koboldai_vars.memory}, room="UI_1")
         emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, room="UI_1")
         if(koboldai_vars.mode == "play"):
@@ -1480,7 +1471,7 @@ def get_message(msg):
         togglewimode()
     elif(msg['cmd'] == 'wiinit'):
         if(int(msg['data']) < len(koboldai_vars.worldinfo)):
-            setgamesaved(False)
+            set_gamesaved(False)
             koboldai_vars.worldinfo[msg['data']]["init"] = True
             addwiitem(folder_uid=msg['folder'])
     elif(msg['cmd'] == 'wifolderinit'):
@@ -1495,22 +1486,22 @@ def get_message(msg):
         deletewifolder(msg['data'])
     elif(msg['cmd'] == 'wiexpand'):
         assert 0 <= int(msg['data']) < len(koboldai_vars.worldinfo)
-        setgamesaved(False)
+        set_gamesaved(False)
         emit('from_server', {'cmd': 'wiexpand', 'data': msg['data']}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wiexpandfolder'):
         assert 0 <= int(msg['data']) < len(koboldai_vars.worldinfo)
-        setgamesaved(False)
+        set_gamesaved(False)
         emit('from_server', {'cmd': 'wiexpandfolder', 'data': msg['data']}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wifoldercollapsecontent'):
-        setgamesaved(False)
+        set_gamesaved(False)
         koboldai_vars.wifolders_d[msg['data']]['collapsed'] = True
         emit('from_server', {'cmd': 'wifoldercollapsecontent', 'data': msg['data']}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wifolderexpandcontent'):
-        setgamesaved(False)
+        set_gamesaved(False)
         koboldai_vars.wifolders_d[msg['data']]['collapsed'] = False
         emit('from_server', {'cmd': 'wifolderexpandcontent', 'data': msg['data']}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wiupdate'):
-        setgamesaved(False)
+        set_gamesaved(False)
         num = int(msg['num'])
         fields = ("key", "keysecondary", "content", "comment")
         for field in fields:
@@ -1518,7 +1509,7 @@ def get_message(msg):
                 koboldai_vars.worldinfo[num][field] = msg['data'][field]
         emit('from_server', {'cmd': 'wiupdate', 'num': msg['num'], 'data': {field: koboldai_vars.worldinfo[num][field] for field in fields}}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wifolderupdate'):
-        setgamesaved(False)
+        set_gamesaved(False)
         uid = str(msg['uid'])
         fields = ("name", "collapsed")
         for field in fields:
@@ -1526,22 +1517,22 @@ def get_message(msg):
                 koboldai_vars.wifolders_d[uid][field] = msg['data'][field]
         emit('from_server', {'cmd': 'wifolderupdate', 'uid': msg['uid'], 'data': {field: koboldai_vars.wifolders_d[uid][field] for field in fields}}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wiselon'):
-        setgamesaved(False)
+        set_gamesaved(False)
         koboldai_vars.worldinfo[msg['data']]["selective"] = True
         emit('from_server', {'cmd': 'wiselon', 'data': msg['data']}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wiseloff'):
-        setgamesaved(False)
+        set_gamesaved(False)
         koboldai_vars.worldinfo[msg['data']]["selective"] = False
         emit('from_server', {'cmd': 'wiseloff', 'data': msg['data']}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wiconstanton'):
-        setgamesaved(False)
+        set_gamesaved(False)
         koboldai_vars.worldinfo[msg['data']]["constant"] = True
         emit('from_server', {'cmd': 'wiconstanton', 'data': msg['data']}, broadcast=True, room="UI_1")
     elif(msg['cmd'] == 'wiconstantoff'):
-        setgamesaved(False)
+        set_gamesaved(False)
         koboldai_vars.worldinfo[msg['data']]["constant"] = False
         emit('from_server', {'cmd': 'wiconstantoff', 'data': msg['data']}, broadcast=True, room="UI_1")
-    elif(msg['cmd'] == 'sendwilist'):
+    elif(msg['cmd'] == 'ui1_send_wilist'):
         commitwi(msg['data'])
     elif(msg['cmd'] == 'aidgimport'):
         importAidgRequest(msg['data'])
@@ -2585,12 +2576,6 @@ def pinsequence(n):
     ui1_send_debug()
 
 #==================================================================#
-# Replaces returns and newlines with HTML breaks
-#==================================================================#
-def formatforhtml(txt):
-    return txt.replace("\\r\\n", "<br/>").replace("\\r", "<br/>").replace("\\n", "<br/>").replace("\r\n", "<br/>").replace('\n', '<br/>').replace('\r', '<br/>').replace('&lt;/s&gt;', '<br/>')
-
-#==================================================================#
 # Strips submitted text from the text returned by the AI
 #==================================================================#
 def getnewcontent(txt):
@@ -2609,160 +2594,6 @@ def getnewcontent(txt):
     return utils.decodenewlines(tokenizer.decode(newtokens))
 
 
-#==================================================================#
-# Sends the current story content to the Game Screen
-#==================================================================#
-def refresh_story():
-    text_parts = ['<chunk n="0" id="n0" tabindex="-1">', koboldai_vars.comregex_ui.sub(lambda m: '\n'.join('<comment>' + l + '</comment>' for l in m.group().split('\n')), html.escape(koboldai_vars.prompt)), '</chunk>']
-    for idx in koboldai_vars.actions:
-        item = koboldai_vars.actions[idx]
-        idx += 1
-        item = html.escape(item)
-        item = koboldai_vars.comregex_ui.sub(lambda m: '\n'.join('<comment>' + l + '</comment>' for l in m.group().split('\n')), item)  # Add special formatting to comments
-        item = koboldai_vars.acregex_ui.sub('<action>\\1</action>', item)  # Add special formatting to adventure actions
-        text_parts.extend(('<chunk n="', str(idx), '" id="n', str(idx), '" tabindex="-1">', item, '</chunk>'))
-    emit('from_server', {'cmd': 'updatescreen', 'gamestarted': koboldai_vars.gamestarted, 'data': formatforhtml(''.join(text_parts))}, broadcast=True, room="UI_1")
-
-
-#==================================================================#
-# Signals the Game Screen to update one of the chunks
-#==================================================================#
-def update_story_chunk(idx: Union[int, str]):
-    if idx == 'last':
-        if len(koboldai_vars.actions) <= 1:
-            # In this case, we are better off just refreshing the whole thing as the
-            # prompt might not have been shown yet (with a "Generating story..."
-            # message instead).
-            refresh_story()
-            setgamesaved(False)
-            return
-
-        idx = (koboldai_vars.actions.get_last_key() if len(koboldai_vars.actions) else 0) + 1
-
-    if idx == 0:
-        text = koboldai_vars.prompt
-    else:
-        # Actions are 0 based, but in chunks 0 is the prompt.
-        # So the chunk index is one more than the corresponding action index.
-        if(idx - 1 not in koboldai_vars.actions):
-            return
-        text = koboldai_vars.actions[idx - 1]
-
-    item = html.escape(text)
-    item = koboldai_vars.comregex_ui.sub(lambda m: '\n'.join('<comment>' + l + '</comment>' for l in m.group().split('\n')), item)  # Add special formatting to comments
-    item = koboldai_vars.acregex_ui.sub('<action>\\1</action>', item)  # Add special formatting to adventure actions
-
-    chunk_text = f'<chunk n="{idx}" id="n{idx}" tabindex="-1">{formatforhtml(item)}</chunk>'
-    emit('from_server', {'cmd': 'updatechunk', 'data': {'index': idx, 'html': chunk_text}}, broadcast=True, room="UI_1")
-
-    setgamesaved(False)
-
-    
-
-#==================================================================#
-# Signals the Game Screen to remove one of the chunks
-#==================================================================#
-def remove_story_chunk(idx: int):
-    emit('from_server', {'cmd': 'removechunk', 'data': idx}, broadcast=True, room="UI_1")
-    setgamesaved(False)
-
-
-#==================================================================#
-# Sends the current generator settings to the Game Menu
-#==================================================================#
-def refresh_settings():
-    # Suppress toggle change events while loading state
-    socketio.emit('from_server', {'cmd': 'allowtoggle', 'data': False}, broadcast=True, room="UI_1")
-    
-    if(koboldai_vars.model != "InferKit"):
-        socketio.emit('from_server', {'cmd': 'updatetemp', 'data': koboldai_vars.temp}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatetopp', 'data': koboldai_vars.top_p}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatetopk', 'data': koboldai_vars.top_k}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatetfs', 'data': koboldai_vars.tfs}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatetypical', 'data': koboldai_vars.typical}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatetopa', 'data': koboldai_vars.top_a}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatereppen', 'data': koboldai_vars.rep_pen}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatereppenslope', 'data': koboldai_vars.rep_pen_slope}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatereppenrange', 'data': koboldai_vars.rep_pen_range}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updateoutlen', 'data': koboldai_vars.genamt}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatetknmax', 'data': koboldai_vars.max_length}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatenumseq', 'data': koboldai_vars.numseqs}, broadcast=True, room="UI_1")
-    else:
-        socketio.emit('from_server', {'cmd': 'updatetemp', 'data': koboldai_vars.temp}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updatetopp', 'data': koboldai_vars.top_p}, broadcast=True, room="UI_1")
-        socketio.emit('from_server', {'cmd': 'updateikgen', 'data': koboldai_vars.ikgen}, broadcast=True, room="UI_1")
-    
-    socketio.emit('from_server', {'cmd': 'updateanotedepth', 'data': koboldai_vars.andepth}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatewidepth', 'data': koboldai_vars.widepth}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updateuseprompt', 'data': koboldai_vars.useprompt}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updateadventure', 'data': koboldai_vars.adventure}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatechatmode', 'data': koboldai_vars.chatmode}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatedynamicscan', 'data': koboldai_vars.dynamicscan}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updateautosave', 'data': koboldai_vars.autosave}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatenopromptgen', 'data': koboldai_vars.nopromptgen}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updaterngpersist', 'data': koboldai_vars.rngpersist}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatenogenmod', 'data': koboldai_vars.nogenmod}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatefulldeterminism', 'data': koboldai_vars.full_determinism}, broadcast=True, room="UI_1")
-    
-    socketio.emit('from_server', {'cmd': 'updatefrmttriminc', 'data': koboldai_vars.frmttriminc}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatefrmtrmblln', 'data': koboldai_vars.frmtrmblln}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatefrmtrmspch', 'data': koboldai_vars.frmtrmspch}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatefrmtadsnsp', 'data': koboldai_vars.frmtadsnsp}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatesingleline', 'data': koboldai_vars.singleline}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updateoutputstreaming', 'data': koboldai_vars.output_streaming}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updateshowbudget', 'data': koboldai_vars.show_budget}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updateshowprobs', 'data': koboldai_vars.show_probs}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatealt_text_gen', 'data': koboldai_vars.alt_gen}, broadcast=True, room="UI_1")
-    socketio.emit('from_server', {'cmd': 'updatealt_multi_gen', 'data': koboldai_vars.alt_multi_gen}, broadcast=True, room="UI_1")
-    
-    # Allow toggle events again
-    socketio.emit('from_server', {'cmd': 'allowtoggle', 'data': True}, broadcast=True, room="UI_1")
-
-
-#==================================================================#
-# 
-#==================================================================#
-def editrequest(n):
-    if(n == 0):
-        txt = koboldai_vars.prompt
-    else:
-        txt = koboldai_vars.actions[n-1]
-    
-    koboldai_vars.editln = n
-    emit('from_server', {'cmd': 'setinputtext', 'data': txt}, broadcast=True, room="UI_1")
-    emit('from_server', {'cmd': 'enablesubmit', 'data': ''}, broadcast=True, room="UI_1")
-
-#==================================================================#
-# 
-#==================================================================#
-def editsubmit(data):
-    koboldai_vars.recentedit = True
-    if(koboldai_vars.editln == 0):
-        koboldai_vars.prompt = data
-    else:
-        koboldai_vars.actions[koboldai_vars.editln-1] = data
-    
-    koboldai_vars.mode = "play"
-    update_story_chunk(koboldai_vars.editln)
-    emit('from_server', {'cmd': 'texteffect', 'data': koboldai_vars.editln}, broadcast=True, room="UI_1")
-    emit('from_server', {'cmd': 'editmode', 'data': 'false'}, room="UI_1")
-    ui1_send_debug()
-
-#==================================================================#
-#  
-#==================================================================#
-def deleterequest():
-    koboldai_vars.recentedit = True
-    # Don't delete prompt
-    if(koboldai_vars.editln == 0):
-        # Send error message
-        pass
-    else:
-        koboldai_vars.actions.delete_action(koboldai_vars.editln-1)
-        koboldai_vars.mode = "play"
-        remove_story_chunk(koboldai_vars.editln)
-        emit('from_server', {'cmd': 'editmode', 'data': 'false'}, room="UI_1")
-    ui1_send_debug()
 
     
 #==================================================================#
@@ -2773,7 +2604,7 @@ def memsubmit(data):
     # Maybe check for length at some point
     # For now just send it to storage
     if(data != koboldai_vars.memory):
-        setgamesaved(False)
+        set_gamesaved(False)
     koboldai_vars.memory = data
     koboldai_vars.mode = "play"
     emit('from_server', {'cmd': 'memmode', 'data': 'false'}, broadcast=True, room="UI_1")
@@ -2789,7 +2620,7 @@ def anotesubmit(data, template=""):
     # Maybe check for length at some point
     # For now just send it to storage
     if(data != koboldai_vars.authornote):
-        setgamesaved(False)
+        set_gamesaved(False)
     koboldai_vars.authornote = data
 
     if(koboldai_vars.authornotetemplate != template):
@@ -3064,7 +2895,7 @@ def saveRequest(savpath, savepins=True):
             filename = filename[:-5]
         koboldai_vars.laststory = filename
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, broadcast=True, room="UI_1")
-        setgamesaved(True)
+        set_gamesaved(True)
         print("{0}Story saved to {1}!{2}".format(Colors.GREEN, path.basename(savpath), Colors.END))
 
 #==================================================================#
@@ -3281,8 +3112,8 @@ def load_story_v1(js, from_file=None):
     
     # Refresh game screen
     emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, broadcast=True, room="UI_1")
-    setgamesaved(True)
-    sendwi()
+    set_gamesaved(True)
+    ui1_send_wi()
     emit('from_server', {'cmd': 'setmemory', 'data': koboldai_vars.memory}, broadcast=True, room="UI_1")
     emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, broadcast=True, room="UI_1")
     emit('from_server', {'cmd': 'setanotetemplate', 'data': koboldai_vars.authornotetemplate}, broadcast=True, room="UI_1")
@@ -3461,8 +3292,8 @@ def importgame():
         # Refresh game screen
         koboldai_vars.laststory = None
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, broadcast=True, room="UI_1")
-        setgamesaved(False)
-        sendwi()
+        set_gamesaved(False)
+        ui1_send_wi()
         emit('from_server', {'cmd': 'setmemory', 'data': koboldai_vars.memory}, broadcast=True, room="UI_1")
         emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, broadcast=True, room="UI_1")
         emit('from_server', {'cmd': 'setanotetemplate', 'data': koboldai_vars.authornotetemplate}, broadcast=True, room="UI_1")
@@ -3522,8 +3353,8 @@ def importAidgRequest(id):
         # Refresh game screen
         koboldai_vars.laststory = None
         emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, broadcast=True, room="UI_1")
-        setgamesaved(False)
-        sendwi()
+        set_gamesaved(False)
+        ui1_send_wi()
         emit('from_server', {'cmd': 'setmemory', 'data': koboldai_vars.memory}, broadcast=True, room="UI_1")
         emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, broadcast=True, room="UI_1")
         emit('from_server', {'cmd': 'setanotetemplate', 'data': koboldai_vars.authornotetemplate}, broadcast=True, room="UI_1")
@@ -3581,8 +3412,8 @@ def wiimportrequest():
             print("{0}".format(koboldai_vars.worldinfo[0]))
                 
         # Refresh game screen
-        setgamesaved(False)
-        sendwi()
+        set_gamesaved(False)
+        ui1_send_wi()
 
 #==================================================================#
 #  Starts a new story
@@ -3615,8 +3446,8 @@ def newGameRequest():
     # Refresh game screen
     koboldai_vars.laststory = None
     emit('from_server', {'cmd': 'setstoryname', 'data': koboldai_vars.laststory}, broadcast=True, room="UI_1")
-    setgamesaved(True)
-    sendwi()
+    set_gamesaved(True)
+    ui1_send_wi()
     emit('from_server', {'cmd': 'setmemory', 'data': koboldai_vars.memory}, broadcast=True, room="UI_1")
     emit('from_server', {'cmd': 'setanote', 'data': koboldai_vars.authornote}, broadcast=True, room="UI_1")
     emit('from_server', {'cmd': 'setanotetemplate', 'data': koboldai_vars.authornotetemplate}, broadcast=True, room="UI_1")
@@ -3631,7 +3462,7 @@ def randomGameRequest(topic, memory=""):
     koboldai_vars.recentrng = topic
     koboldai_vars.recentrngm = memory
     newGameRequest()
-    setgamesaved(False)
+    set_gamesaved(False)
     _memory = memory
     if(len(memory) > 0):
         _memory = memory.rstrip() + "\n\n"

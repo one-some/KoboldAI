@@ -3424,7 +3424,7 @@ def actionsubmit(data, actionmode=0, force_submit=False, force_prompt_gen=False,
                 emit('from_server', {'cmd': 'scrolldown', 'data': ''}, broadcast=True, room="UI_1")
                 break
 
-def apiactionsubmit_generate(txt, minimum, maximum):
+def apiactionsubmit_generate(txt, minimum, maximum, stream_callback):
     koboldai_vars.generated_tkns = 0
 
     if not koboldai_vars.quiet:
@@ -3437,7 +3437,7 @@ def apiactionsubmit_generate(txt, minimum, maximum):
         torch.cuda.empty_cache()
 
     # Submit input text to generator
-    _genout, already_generated = tpool.execute(model.core_generate, txt, set())
+    _genout, already_generated = tpool.execute(model.core_generate, txt, set(), stream_callback=stream_callback)
 
     genout = [utils.applyoutputformatting(utils.decodenewlines(tokenizer.decode(tokens[-already_generated:]))) for tokens in _genout]
 
@@ -3546,7 +3546,7 @@ def apiactionsubmit(data, use_memory=False, use_world_info=False, use_story=Fals
     maximum = len(tokens) + koboldai_vars.genamt
 
     if(not koboldai_vars.use_colab_tpu and koboldai_vars.model not in ["Colab", "API", "CLUSTER", "OAI", "TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX"]):
-        genout = apiactionsubmit_generate(tokens, minimum, maximum)
+        genout = apiactionsubmit_generate(tokens, minimum, maximum, stream_callback=stream_callback)
     elif(koboldai_vars.use_colab_tpu or koboldai_vars.model in ("TPUMeshTransformerGPTJ", "TPUMeshTransformerGPTNeoX")):
         genout = apiactionsubmit_tpumtjgenerate(tokens, minimum, maximum)
 
@@ -8194,9 +8194,11 @@ def _generate_text(body: GenerationInputSchema):
             "msg": "Server is busy; please try again later.",
             "type": "service_unavailable",
         }}), mimetype="application/json", status=503))
+
     if koboldai_vars.use_colab_tpu:
         import tpu_mtj_backend
         tpu_mtj_backend.socketio = socketio
+
     if hasattr(body, "sampler_seed"):
         # If a seed was specified, we need to save the global RNG state so we
         # can restore it later
@@ -8215,9 +8217,11 @@ def _generate_text(body: GenerationInputSchema):
             else:
                 torch.manual_seed(body.sampler_seed)
         koboldai_vars.rng_states[body.sampler_seed] = tpu_mtj_backend.get_rng_state() if koboldai_vars.use_colab_tpu else torch.get_rng_state()
+
     if hasattr(body, "sampler_order"):
         if len(body.sampler_order) < 7:
             body.sampler_order = [6] + body.sampler_order
+
     # This maps each property of the setting to use when sending the generate idempotently
     # To the object which typically contains it's value
     # This allows to set the property only for the API generation, and then revert the setting
@@ -8257,6 +8261,7 @@ def _generate_text(body: GenerationInputSchema):
     koboldai_vars.show_probs = False
     output_streaming = koboldai_vars.output_streaming
     koboldai_vars.output_streaming = False
+
     for key, entry in mapping.items():
         obj = {"koboldai_vars": koboldai_vars}[entry[0]]
         if entry[2] == "input" and koboldai_vars.disable_input_formatting and not hasattr(body, key):
@@ -8270,13 +8275,26 @@ def _generate_text(body: GenerationInputSchema):
             else:
                 saved_settings[key] = getattr(obj, entry[1])
                 setattr(obj, entry[1], getattr(body, key))
+
     try:
         if koboldai_vars.allowsp and getattr(body, "soft_prompt", None) is not None:
             if any(q in body.soft_prompt for q in ("/", "\\")):
                 raise RuntimeError
             old_spfilename = koboldai_vars.spfilename
             spRequest(body.soft_prompt.strip())
+        
+        stream_callback = None
+        if body.get("stream_response") == "true":
+            def generate():
+                def stream_callback(data):
+                    print("HI", data)
+                    yield f"{','.join(row)}\n"
+
+            return generate(), {"Content-Type": "text/csv"}
+
+
         genout = apiactionsubmit(body.prompt, use_memory=body.use_memory, use_story=body.use_story, use_world_info=body.use_world_info, use_authors_note=body.use_authors_note)
+
         output = {"results": [{"text": txt} for txt in genout]}
     finally:
         for key in saved_settings:

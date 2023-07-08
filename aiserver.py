@@ -1401,6 +1401,7 @@ def general_startup(override_args=None):
     parser.add_argument('-v', '--verbosity', action='count', default=0, help="The default logging level is ERROR or higher. This value increases the amount of logging seen in your screen")
     parser.add_argument('-q', '--quiesce', action='count', default=0, help="The default logging level is ERROR or higher. This value decreases the amount of logging seen in your screen")
     parser.add_argument("--panic", action='store_true', help="Disables falling back when loading fails.")
+    parser.add_argument("--compile", action='store_true', help="Enables JIT compilation as a model optimization.")
 
     #args: argparse.Namespace = None
     if "pytest" in sys.modules and override_args is None:

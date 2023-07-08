@@ -419,6 +419,21 @@ class HFTorchInferenceModel(HFInferenceModel):
                 else:
                     model = model.to("cuda")
 
+            if utils.args.compile:
+                print("\n\n")
+                print(" = " * 15)
+                for device_index in range(torch.cuda.device_count()):
+                    props = torch.cuda.get_device_properties(device_index)
+                    if props.major < 8:
+                        print(f"[Device:{device_index}] [{props.name}] This device's CUDA major version ({props.major}) is less than 8. You may not see improvements from compilation on this device.")
+                    else:
+                        print(f"[Device:{device_index}] [{props.name}] This device's CUDA major version ({props.major}) is GREATER THAN than 8, compilation is expected to improve performance")
+                print("[torch.compile] PRECOMP")
+                model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
+                print("[torch.compile] POSTCOMP")
+                print(" = " * 15)
+                print("\n")
+
             return model
         except Exception as e:
             traceback_string = traceback.format_exc().lower()

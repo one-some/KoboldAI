@@ -45,8 +45,15 @@ def handle_request(
     if command == "ping":
         return "pong"
     elif command == "raw_generate":
+        prompt = parameters.get("prompt", None)
+
+        if not prompt:
+            raise WebSocketAPIError("No 'prompt' parameter")
+        if not isinstance(prompt, str):
+            raise WebSocketAPIError("'prompt' is not a string")
+
         ai.model.raw_generate(
-            prompt="Once upon a time...\n",
+            prompt=prompt,
             max_new=25,
             token_callback=token_callback_factory(stream_callback),
         )

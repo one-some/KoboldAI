@@ -152,8 +152,7 @@ class model_backend(InferenceModel):
         self.init_model_config()
 
         self.model = AutoModelForCausalLM.from_pretrained(
-            self.get_local_model_path(), low_cpu_mem_usage=True, device_map="auto", load_in_4bit=True
-
+            self.get_local_model_path(), low_cpu_mem_usage=True, device_map="auto"
         )
 
         self.tokenizer = self._get_tokenizer(self.get_local_model_path())

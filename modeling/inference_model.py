@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Union
 from logger import logger
 
 import torch
@@ -532,6 +532,7 @@ class InferenceModel:
         found_entries: set = (),
         tpu_dynamic_inference: bool = False,
         seed: Optional[int] = None,
+        token_callback: Optional[Callable] = None,
         **kwargs,
     ) -> GenerationResult:
         """A wrapper around `_raw_generate()` that handles gen_state and other stuff. Use this to generate text outside of the story.
@@ -547,6 +548,7 @@ class InferenceModel:
             is_core (bool, optional): Whether this generation is a core story generation. Defaults to False.
             single_line (bool, optional): Generate one line only.. Defaults to False.
             found_entries (set, optional): Entries found for Dynamic WI. Defaults to ().
+            token_callback: (Callable, optional): Callback for generated tokens. Params are (model: InferenceModel, input_ids: torch.LongTensor). Defaults to None.
 
         Raises:
             ValueError: If prompt type is weird
@@ -559,6 +561,9 @@ class InferenceModel:
 
         self.gen_state["do_streaming"] = do_streaming
         self.gen_state["do_dynamic_wi"] = do_dynamic_wi
+        
+        if token_callback:
+            self.post_token_hooks.append(token_callback)
 
         # Dynamic WI depends on this!!! This is a main gen call.
         self.gen_state["stop_at_genamt"] = do_dynamic_wi
@@ -603,6 +608,9 @@ class InferenceModel:
             logger.info(
                 f"Generated {len(result.encoded[0])} tokens in {time_end} seconds, for an average rate of {tokens_per_second} tokens per second."
             )
+
+        if token_callback:
+            self.post_token_hooks.remove(token_callback)
 
         return result
 

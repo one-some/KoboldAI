@@ -29,6 +29,7 @@ logging.getLogger("urllib3").setLevel(logging.ERROR)
 
 import attention_bias
 attention_bias.do_patches()
+import ai
 
 from os import path, getcwd
 import time
@@ -1629,8 +1630,9 @@ def unload_model():
     global generator
     global model_config
     global tokenizer
-    
+
     #We need to wipe out the existing model and refresh the cuda cache
+    ai.model = None
     model = None
     generator = None
     model_config = None
@@ -1782,6 +1784,8 @@ def load_model(model_backend, initial_load=False):
     # TODO: Convert everywhere to use model.tokenizer
     if model:
         tokenizer = model.tokenizer
+    
+    ai.model = model
 
     loadmodelsettings()
     loadsettings()
@@ -10927,6 +10931,10 @@ def run():
     logger.init("Webserver", status="Closed")
     
 if __name__ == "__main__":
+    # TODO: Put in real place
+    import websocket_api
+    websocket_api.start()
+
     run()
 else:
     command_line_backend = general_startup()

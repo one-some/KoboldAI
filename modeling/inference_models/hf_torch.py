@@ -382,6 +382,8 @@ class HFTorchInferenceModel(HFInferenceModel):
                         tf_kwargs["device_map"] = self.breakmodel_config.get_device_map(
                             metamodel
                         )
+            else:
+                tf_kwargs["device_map"] = "sequential"
 
             try:
                 # Try to load with the lazyloader first...

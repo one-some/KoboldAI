@@ -28,7 +28,7 @@ model_backend_type = "Huggingface"
 
 class model_backend(InferenceModel):
     # Model backends must inherit from InferenceModel. Many HF-specific behaviors which could be inherited
-    # from HFInferenceModel are not here for sake of hackability.
+    # from HFInferenceModel are redundantly implemented here for the sake of hackability.
 
     def __init__(self) -> None:
         super().__init__()

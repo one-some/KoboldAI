@@ -1,13 +1,12 @@
 import torch
 
 import utils
-from modeling.inference_model import InferenceModel
 
 
 class PostTokenHooks:
     @staticmethod
     def stream_tokens(
-        model: InferenceModel,
+        model,
         input_ids: torch.LongTensor,
     ) -> None:
         if not model.gen_state.get("do_streaming"):

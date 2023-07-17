@@ -9,7 +9,7 @@ from typing import List, Optional, Union
 
 import torch
 import transformers
-from transformers import AutoConfig, AutoModelForCausalLM, LogitsProcessorList
+from transformers import AutoConfig, AutoModelForCausalLM, LogitsProcessorList, StoppingCriteria
 
 import utils
 from logger import logger
@@ -152,7 +152,8 @@ class model_backend(InferenceModel):
         self.init_model_config()
 
         self.model = AutoModelForCausalLM.from_pretrained(
-            self.get_local_model_path(), low_cpu_mem_usage=True, device_map="auto"
+            self.get_local_model_path(), low_cpu_mem_usage=True, device_map="auto", load_in_4bit=True
+
         )
 
         self.tokenizer = self._get_tokenizer(self.get_local_model_path())
@@ -192,6 +193,35 @@ class model_backend(InferenceModel):
 
         new_sample.old_sample = transformers.GenerationMixin.sample
         use_core_manipulations.sample = new_sample
+
+        # Patch Huggingface to use our stoppers and _post_token_gen. This handles
+        # things like token streaming and stopping criteria.
+        class PTHStopper(StoppingCriteria):
+            def __call__(
+                hf_self,
+                input_ids: torch.LongTensor,
+                scores: torch.FloatTensor,
+            ) -> None:
+                # NOTE: self points to the InferenceModel here.
+                self._post_token_gen(input_ids)
+
+                for stopper in self.stopper_hooks:
+                    do_stop = stopper(self, input_ids)
+                    if do_stop:
+                        return True
+                return False
+
+        def _get_stopping_criteria(
+            hf_self,
+            *args,
+            **kwargs,
+        ):
+            stopping_criteria = _get_stopping_criteria.old_gsc(hf_self, *args, **kwargs)
+            stopping_criteria.insert(0, PTHStopper())
+            return stopping_criteria
+
+        _get_stopping_criteria.old_gsc = transformers.GenerationMixin._get_stopping_criteria
+        use_core_manipulations.get_stopping_criteria = _get_stopping_criteria
 
 
     def _post_load(self) -> None:

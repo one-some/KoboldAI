@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 from typing import List, Optional, Union
-from logger import logger
 
-import torch
 import numpy as np
+import torch
 import transformers
-from transformers import (
-    GPT2Tokenizer,
-    AutoTokenizer,
-)
-from modeling.tokenizer import GenericTokenizer
-from modeling import logits_processors
+from transformers import AutoTokenizer, GPT2Tokenizer
 
 import utils
+from logger import logger
+from modeling import logits_processors
+from modeling.post_token_hooks import PostTokenHooks
+from modeling.tokenizer import GenericTokenizer
 
 
 # We only want to use logit manipulations and such on our core text model
@@ -160,7 +158,7 @@ class InferenceModel:
 
     def __init__(self) -> None:
         self.gen_state = {}
-        self.post_token_hooks = []
+        self.post_token_hooks = [PostTokenHooks.stream_tokens]
         self.stopper_hooks = []
         self.logits_processors = [
             logits_processors.LuaIntegration(),

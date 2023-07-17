@@ -1,12 +1,10 @@
 from __future__ import annotations
-from dataclasses import dataclass
 
 import os
 import time
 import bisect
 import itertools
 import traceback
-import contextlib
 from torch import nn
 from typing import Dict, List, Optional, Union
 
@@ -28,7 +26,6 @@ from logger import logger, Colors
 from modeling import warpers
 from modeling.warpers import Warper
 from modeling.stoppers import Stoppers
-from modeling.post_token_hooks import PostTokenHooks
 from modeling.inference_models.hf import HFInferenceModel
 from modeling.inference_model import (
     GenerationResult,
@@ -90,10 +87,6 @@ class HFTorchInferenceModel(HFInferenceModel):
         self.lazy_load = True
         self.low_mem = False
         self.nobreakmodel = False
-
-        self.post_token_hooks = [
-            PostTokenHooks.stream_tokens,
-        ]
 
         self.stopper_hooks = [
             Stoppers.core_stopper,

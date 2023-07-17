@@ -77,7 +77,7 @@ def handle_raw_message(
     if nonce:
         nonce = str(nonce)
         if len(nonce) > 128:
-            raise WebSocketAPIErrro("")
+            raise WebSocketAPIError("Nonce value is unreasonably long, chill out")
 
     try:
         command = str(request["cmd"])

@@ -27,7 +27,8 @@ model_backend_type = "Huggingface"
 
 
 class model_backend(InferenceModel):
-    # Model backends must inherit from InferenceModel.
+    # Model backends must inherit from InferenceModel. Many HF-specific behaviors which could be inherited
+    # from HFInferenceModel are not here for sake of hackability.
 
     def __init__(self) -> None:
         super().__init__()
@@ -191,6 +192,94 @@ class model_backend(InferenceModel):
 
         new_sample.old_sample = transformers.GenerationMixin.sample
         use_core_manipulations.sample = new_sample
+
+
+    def _post_load(self) -> None:
+        # Copied from HFInferenceModel. Some comments have been snipped for brevity as
+        # HF patches are a little out of the scope of the basic backend. See
+        # modeling/inference_models/hf.py for some killer documentation written by Lllama.
+
+        self.badwordsids = koboldai_settings.badwordsids_default
+        self.model_type = str(self.model_config.model_type)
+
+        # These are model specific tokenizer overrides if a model has bad defaults
+        if self.model_type == "llama":
+            # Note: self.tokenizer is a GenericTokenizer, and self.tokenizer.tokenizer is the actual LlamaTokenizer
+            self.tokenizer.add_bos_token = False
+            vocab = self.tokenizer.convert_ids_to_tokens(range(self.tokenizer.vocab_size))
+            has_prefix_space = {i for i, tok in enumerate(vocab) if tok.startswith("▁")}
+
+            original_decode = type(self.tokenizer.tokenizer).decode
+            def decode_wrapper(self, token_ids, *args, **kwargs):
+                first = None
+                if isinstance(token_ids, int):
+                    first = token_ids
+                    token_ids = [first]
+                elif hasattr(token_ids, 'dim'):
+                    if token_ids.dim() == 0:
+                        first = int(token_ids.item())
+                        token_ids = [first]
+                    elif len(token_ids) > 0:
+                        first = int(token_ids[0])
+                elif token_ids is not None and len(token_ids) > 0:
+                    first = token_ids[0]
+                result = original_decode(self, token_ids, *args, **kwargs)
+                if first is not None and first in has_prefix_space:
+                    result = " " + result
+                return result
+            object.__setattr__(self.tokenizer, 'decode', decode_wrapper.__get__(self.tokenizer))
+
+            original_encode = type(self.tokenizer.tokenizer).encode
+            def encode_wrapper(self, text, *args, **kwargs):
+                if type(text) is str:
+                    text = ',' + text
+                    result = original_encode(self, text, *args, **kwargs)
+                    result = result[1:]
+                else:
+                    result = original_encode(self, text, *args, **kwargs)
+                return result
+            object.__setattr__(self.tokenizer, 'encode', encode_wrapper.__get__(self.tokenizer))
+
+            original_call = type(self.tokenizer.tokenizer).__call__
+            def call_wrapper(self, text, *args, **kwargs):
+                if type(text) is str:
+                    text = ',' + text
+                    result = original_call(self, text, *args, **kwargs)
+                    result = result[1:]
+                else:
+                    result = original_call(self, text, *args, **kwargs)
+                return result
+            object.__setattr__(self.tokenizer, '__call__', call_wrapper.__get__(self.tokenizer))
+
+        elif self.model_type == "opt":
+            self.tokenizer._koboldai_header = self.tokenizer.encode("")
+            self.tokenizer.add_bos_token = False
+            self.tokenizer.add_prefix_space = False
+
+        # Change newline behavior to match model quirks
+        if self.model_type == "xglm":
+            # Default to </s> newline mode if using XGLM
+            utils.koboldai_vars.newlinemode = "s"
+        elif self.model_type in ["opt", "bloom"]:
+            # Handle </s> but don't convert newlines if using Fairseq models that have newlines trained in them
+            utils.koboldai_vars.newlinemode = "ns"
+
+        # Clean up tokens that cause issues
+        if (
+            self.badwordsids == koboldai_settings.badwordsids_default
+            and self.model_type not in ("gpt2", "gpt_neo", "gptj")
+        ):
+            self.badwordsids = [
+                [v]
+                for k, v in self.tokenizer.get_vocab().items()
+                if any(c in str(k) for c in "[]")
+            ]
+
+            if utils.koboldai_vars.newlinemode == "n":
+                self.badwordsids.append([self.tokenizer.eos_token_id])
+
+        return super()._post_load()
+
 
     def _apply_warpers(
         self, scores: torch.Tensor, input_ids: torch.Tensor

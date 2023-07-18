@@ -218,7 +218,7 @@ class LazyloadPatches:
                 param = param.materialize(map_location="cpu")
 
                 if modeling.lazy_merge.parameters.enable:
-                    modeling.lazy_merge.merge_with_secondary_models(param_name, param)
+                    param = modeling.lazy_merge.merge_with_secondary_models(param_name, param)
 
             utils.bar.update(1)
             utils.koboldai_vars.loaded_layers += 1

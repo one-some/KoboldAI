@@ -61,6 +61,7 @@ from torch import Tensor
 from torch.nn import Module
 from torch.storage import UntypedStorage
 from modeling.patches import LazyloadPatches
+from modeling import lazy_merge
 
 # Safetensors is a dependency for the local version, TPU/Colab doesn't
 # support it yet.
@@ -499,9 +500,15 @@ def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, miss
 
 @contextlib.contextmanager
 def use_lazy_load(
-    enable=True,
+    enable: bool = True,
     callback: Optional[Callable] = None,
-    dematerialized_modules=False,
+    dematerialized_modules: bool = False,
+
+    # This parameter determines what loads are allowed to use lazy merge. Do not
+    # set this to a dynamic value/setting
+    allow_lazy_merge: bool = False,
+
+    caching_virtual_model: bool = False
 ):
     if not enable:
         with use_custom_unpickler(RestrictedUnpickler):
@@ -511,7 +518,11 @@ def use_lazy_load(
     begin_time = time.time()
 
     try:
-        LazyloadPatches.__enter__()
+        if not caching_virtual_model:
+            LazyloadPatches.__enter__()
+
+        if allow_lazy_merge and lazy_merge.parameters.enable:
+            lazy_merge.start_load()
 
         old_rebuild_tensor = torch._utils._rebuild_tensor
         torch._utils._rebuild_tensor = _rebuild_tensor
@@ -580,14 +591,16 @@ def use_lazy_load(
             yield True
 
     finally:
-        LazyloadPatches.__exit__(None, None, None)
         torch._utils._rebuild_tensor = old_rebuild_tensor
         torch.load = old_torch_load
 
+        if not caching_virtual_model:
+            LazyloadPatches.__exit__(None, None, None)
+
+        if allow_lazy_merge and lazy_merge.parameters.enable:
+            lazy_merge.post_load_cleanup()
+
         post_load_cleanup()
-        logger.debug(
-            f"[lazy_load] Context closed in {round(time.time() - begin_time, 2)} seconds."
-        )
 
         if dematerialized_modules:
             if not USE_TPU_EMPTY_MODULE_METHOD:
@@ -597,6 +610,10 @@ def use_lazy_load(
                 torch.nn.Embedding.__init__ = old_embedding_init
                 torch.nn.LayerNorm.__init__ = old_layernorm_init
                 torch.nn.Module._load_from_state_dict = old_load_from_state_dict
+
+        logger.debug(
+            f"[lazy_load] Context closed in {round(time.time() - begin_time, 2)} seconds."
+        )
 
 
 def post_load_cleanup() -> None:

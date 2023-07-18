@@ -382,6 +382,7 @@ class HFTorchInferenceModel(HFInferenceModel):
                     enable=self.lazy_load,
                     # DO NOT DEMATERIALIZE MODULES / INIT WEIGHTS EMPTY!!! IT WILL EXPLODE!!!!!!!
                     dematerialized_modules=False,
+                    allow_lazy_merge=True
                 ):
                     model = AutoModelForCausalLM.from_pretrained(
                         location,

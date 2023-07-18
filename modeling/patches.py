@@ -216,6 +216,10 @@ class LazyloadPatches:
             if isinstance(param, modeling.lazy_loader.LazyTensor):
                 # Should always be true
                 param = param.materialize(map_location="cpu")
+
+                if modeling.lazy_merge.parameters.enable:
+                    modeling.lazy_merge.merge_with_secondary_models(param_name, param)
+
             utils.bar.update(1)
             utils.koboldai_vars.loaded_layers += 1
 # END PATCH

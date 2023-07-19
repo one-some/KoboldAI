@@ -1433,6 +1433,7 @@ def general_startup(override_args=None):
     parser.add_argument('-v', '--verbosity', action='count', default=0, help="The default logging level is ERROR or higher. This value increases the amount of logging seen in your screen")
     parser.add_argument('-q', '--quiesce', action='count', default=0, help="The default logging level is ERROR or higher. This value decreases the amount of logging seen in your screen")
     parser.add_argument("--panic", action='store_true', help="Disables falling back when loading fails.")
+    parser.add_argument("--lmerge_recipe", type=str, help="Path to a model merge recipe.")
 
     #args: argparse.Namespace = None
     if "pytest" in sys.modules and override_args is None:
@@ -1449,6 +1450,8 @@ def general_startup(override_args=None):
         args = parser.parse_args()
     
     utils.args = args
+
+    modeling.lazy_merge.parse_args(args)
 
 
 

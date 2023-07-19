@@ -1,4 +1,5 @@
 import gc
+from argparse import Namespace
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
@@ -37,6 +38,9 @@ class parameters:
     ]
     main_model_weight: Optional[float] = None
     strategy: MergeStrategy = MergeStrategy.LINEAR
+
+def parse_arg(args: Namespace) -> None:
+    pass
 
 
 def start_load() -> None:

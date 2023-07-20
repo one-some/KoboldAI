@@ -1,38 +1,38 @@
 from __future__ import annotations
 
-import os
-import time
 import bisect
 import itertools
+import os
+import time
 import traceback
-from torch import nn
 from typing import Dict, List, Optional, Union
 
 import torch
-from torch.nn import Embedding
 import transformers
+from optimum.bettertransformer import BetterTransformer
+from torch import nn
+from torch.nn import Embedding
 from transformers import (
-    StoppingCriteria,
-    GPTNeoForCausalLM,
-    GPT2LMHeadModel,
     AutoModelForCausalLM,
+    GPT2LMHeadModel,
+    GPTNeoForCausalLM,
     LogitsProcessorList,
+    StoppingCriteria,
 )
 
-import utils
 import modeling.lazy_loader as lazy_loader
-from logger import logger, Colors
-
+import utils
+from logger import Colors, logger
 from modeling import warpers
-from modeling.warpers import Warper
-from modeling.stoppers import Stoppers
-from modeling.inference_models.hf import HFInferenceModel
 from modeling.inference_model import (
     GenerationResult,
     GenerationSettings,
     ModelCapabilities,
     use_core_manipulations,
 )
+from modeling.inference_models.hf import HFInferenceModel
+from modeling.stoppers import Stoppers
+from modeling.warpers import Warper
 
 # When set to true, messages will appear in the console if samplers are not
 # changing the scores. Keep in mind some samplers don't always change the
@@ -258,7 +258,8 @@ class HFTorchInferenceModel(HFInferenceModel):
         # PEFT Loading. This MUST be done after all save_pretrained calls are
         # finished on the main model.
         if utils.args.peft:
-            from peft import PeftModel, PeftConfig
+            from peft import PeftConfig, PeftModel
+
             local_peft_dir = os.path.join(m_self.get_local_model_path(), "peft")
 
             # Make PEFT dir if it doesn't exist
@@ -267,8 +268,12 @@ class HFTorchInferenceModel(HFInferenceModel):
             except FileExistsError:
                 pass
 
-            peft_local_path = os.path.join(local_peft_dir, utils.args.peft.replace("/", "_"))
-            logger.debug(f"Loading PEFT '{utils.args.peft}', possible local path is '{peft_local_path}'.")
+            peft_local_path = os.path.join(
+                local_peft_dir, utils.args.peft.replace("/", "_")
+            )
+            logger.debug(
+                f"Loading PEFT '{utils.args.peft}', possible local path is '{peft_local_path}'."
+            )
 
             peft_installed_locally = True
             possible_peft_locations = [peft_local_path, utils.args.peft]
@@ -281,12 +286,18 @@ class HFTorchInferenceModel(HFInferenceModel):
                 except ValueError:
                     peft_installed_locally = False
                     if i == len(possible_peft_locations) - 1:
-                        raise RuntimeError(f"Unable to load PeftModel for given name '{utils.args.peft}'. Does it exist?")
+                        raise RuntimeError(
+                            f"Unable to load PeftModel for given name '{utils.args.peft}'. Does it exist?"
+                        )
                 except RuntimeError:
-                    raise RuntimeError("Error while loading PeftModel. Are you using the correct model?")
+                    raise RuntimeError(
+                        "Error while loading PeftModel. Are you using the correct model?"
+                    )
 
             if not peft_installed_locally:
-                logger.debug(f"PEFT not saved to models folder; saving to '{peft_local_path}'")
+                logger.debug(
+                    f"PEFT not saved to models folder; saving to '{peft_local_path}'"
+                )
                 m_self.model.save_pretrained(peft_local_path)
 
         return super()._post_load()
@@ -389,11 +400,16 @@ class HFTorchInferenceModel(HFInferenceModel):
                         torch_dtype=self._get_target_dtype(),
                         **tf_kwargs,
                     )
+                    model = BetterTransformer.transform(
+                        model, keep_original_model=False
+                    )
             except Exception as e:
                 # ...but fall back to stock HF if lazyloader fails.
                 if utils.args.panic:
                     raise
-                logger.error("Lazyloader failed, falling back to stock HF load. You may run out of RAM here. Details:")
+                logger.error(
+                    "Lazyloader failed, falling back to stock HF load. You may run out of RAM here. Details:"
+                )
                 logger.error(e)
                 logger.error(traceback.format_exc())
                 logger.info("Falling back to stock HF load...")

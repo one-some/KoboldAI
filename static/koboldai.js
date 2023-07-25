@@ -6880,12 +6880,12 @@ $el("#generate-image-button").addEventListener("click", function() {
 /* -- Shiny New Chat -- */
 function addMessage(author, content, actionId, afterMsgEl=null, time=null) {
 	if (!time) time = Number(new Date());
-	const gameScreen = $el("#gamescreen");
+	const container = $el("#chat-container");
 
 	let insertionLocation = afterMsgEl ? {after: afterMsgEl} : null
 	const message = $e(
 		"div",
-		gameScreen,
+		container,
 		{classes: ["chat-message", "chat-style-channel"], "action-id": actionId},
 		// Insertion location
 		insertionLocation,
@@ -7004,6 +7004,10 @@ function computeChatGametext(actionId) {
 
 function updateChatStyle() {
 	const storyArea = document.getElementById("Selected Text");
+	storyArea.classList.toggle("hidden", chat.useV2);
+
+	const chatContainer = document.getElementById("chat-container");
+	chatContainer.classList.toggle("hidden", !chat.useV2);
 
 	if (chat.useV2) {
 		// Already v2, do nothing
@@ -7012,7 +7016,6 @@ function updateChatStyle() {
 		}
 
 		// Delete normal text
-
 		while (storyArea.firstChild) {
 			storyArea.removeChild(storyArea.firstChild);
 		}

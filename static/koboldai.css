@@ -3077,6 +3077,10 @@ body {
 }
 
 /* Yahoo it's Chatv2 */
+#chat-container {
+	margin-top: auto;
+}
+
 .chat-message {
 	display: flex;
 	margin-bottom: 16px;

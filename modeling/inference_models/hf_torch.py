@@ -17,9 +17,12 @@ from transformers import (
     StoppingCriteria,
     GPTNeoForCausalLM,
     GPT2LMHeadModel,
-    AutoModelForCausalLM,
     LogitsProcessorList,
 )
+try:
+    from hf_bleeding_edge import AutoModelForCausalLM
+except ImportError:
+    from transformers import AutoModelForCausalLM
 
 import utils
 import modeling.lazy_loader as lazy_loader
@@ -123,8 +126,13 @@ class HFTorchInferenceModel(HFInferenceModel):
         return ret
 
     def get_auxilary_device(self) -> Union[str, int, torch.device]:
-        return self.breakmodel_config.primary_device
-
+        if self.breakmodel:
+            return self.breakmodel_config.primary_device
+        if self.usegpu:
+            return "cuda:0"
+        else:
+            return "cpu"
+        
     def _get_target_dtype(self) -> Union[torch.float16, torch.float32]:
         if self.breakmodel_config.primary_device == "cpu":
             return torch.float32
@@ -225,9 +233,6 @@ class HFTorchInferenceModel(HFInferenceModel):
         )
 
         class KoboldLogitsWarperList(LogitsProcessorList):
-            def __init__(self):
-                pass
-
             def __call__(
                 lw_self,
                 input_ids: torch.LongTensor,
@@ -244,16 +249,10 @@ class HFTorchInferenceModel(HFInferenceModel):
                     ), f"Scores are None; processor '{processor}' is to blame"
                 return scores
 
-        def new_get_logits_warper(
-            beams: int = 1,
-        ) -> LogitsProcessorList:
-            return KoboldLogitsWarperList()
-
         def new_sample(self, *args, **kwargs):
             assert kwargs.pop("logits_warper", None) is not None
-            kwargs["logits_warper"] = new_get_logits_warper(
-                beams=1,
-            )
+            kwargs["logits_warper"] = KoboldLogitsWarperList()
+
             if utils.koboldai_vars.newlinemode in ["s", "ns"]:
                 kwargs["eos_token_id"] = -1
                 kwargs.setdefault("pad_token_id", 2)
@@ -326,7 +325,7 @@ class HFTorchInferenceModel(HFInferenceModel):
         with torch.no_grad():
             start_time = time.time()
             genout = self.model.generate(
-                gen_in,
+                input_ids=gen_in,
                 do_sample=True,
                 max_length=min(
                     len(prompt_tokens) + max_new, utils.koboldai_vars.max_length

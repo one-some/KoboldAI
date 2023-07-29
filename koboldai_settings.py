@@ -305,8 +305,7 @@ class koboldai_vars(object):
         if len(memory_tokens) != 0:
             context.append({"type": "memory", 
                             "text": "".join([x[1] for x in memory_data]), 
-                            "tokens": memory_data,
-                            "attention_multiplier": self.memory_attn_bias})
+                            "tokens": memory_data})
             used_tokens += len(memory_tokens)
         
         
@@ -419,7 +418,7 @@ class koboldai_vars(object):
 
             #Add our author's note if we've hit andepth
             if not inserted_author_note and len(actions_seen) >= self.andepth and sentences_seen > self.andepth and self.authornote != "":
-                game_context.insert(0, {"type": "authors_note", "text": authors_note_text, "tokens": authors_note_data, "attention_multiplier": self.an_attn_bias})
+                game_context.insert(0, {"type": "authors_note", "text": authors_note_text, "tokens": authors_note_data})
                 inserted_author_note = True
 
             # Add to actions_seen after potentially inserting the author note, since we want to insert the author note
@@ -500,7 +499,7 @@ class koboldai_vars(object):
         ######################################### Verify Author's Note Data in AI Text ########################################################
         #if we don't have enough actions to get to author's note depth then we just add it right before the game text
         if not inserted_author_note and self.authornote != "":
-            game_context.insert(0, {"type": "authors_note", "text": authors_note_text, "tokens": authors_note_data, "attention_multiplier": self.an_attn_bias})
+            game_context.insert(0, {"type": "authors_note", "text": authors_note_text, "tokens": authors_note_data})
         
         
         ######################################### Add our prompt data ########################################################
@@ -911,9 +910,6 @@ class story_settings(settings):
         # .append() or the like
         self.genres = []
         
-        # bias experiment
-        self.memory_attn_bias = 1
-        self.an_attn_bias = 1
         self.chat_style = 0
 
         # In percent!!!

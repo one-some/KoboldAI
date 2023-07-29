@@ -27,9 +27,6 @@ from ansi2html import Ansi2HTMLConverter
 
 logging.getLogger("urllib3").setLevel(logging.ERROR)
 
-import attention_bias
-attention_bias.do_patches()
-
 from os import path, getcwd
 import time
 import re
@@ -3808,35 +3805,11 @@ def calcsubmit(txt):
         logger.debug("Submit: get_text time {}s".format(time.time()-start_time))
 
         start_time = time.time()
-        if koboldai_vars.experimental_features and any([c.get("attention_multiplier", 1) != 1 for c in koboldai_vars.context]):
-            offset = 0
-            applied_biases = []
-            for c in koboldai_vars.context:
-                length = len(c["tokens"])
-                if c.get("attention_multiplier") and c["attention_multiplier"] != 1:
-                    applied_biases.append({"start": offset, "end": offset + length, "multiplier": c.get("attention_multiplier", 1)})
-                offset += length
-
-            logger.info(f"Applied Biases: {applied_biases}")
-
-            bias = []
-            for b in applied_biases:
-                for i in range(b["start"], b["end"]):
-                    top_index = len(bias) - 1
-                    if i > top_index:
-                        bias += [1] * (i - top_index)
-                    bias[i] = b["multiplier"]
-
-            
-            device = model.get_auxilary_device()
-            attention_bias.attention_bias = torch.Tensor(bias).to(device)
-            logger.info(f"Bias by {koboldai_vars.memory_attn_bias} -- {attention_bias.attention_bias}")
         logger.debug("Submit: experimental_features time {}s".format(time.time()-start_time))
         
         start_time = time.time()
         generate(subtxt, min, max, found_entries)
         logger.debug("Submit: generate time {}s".format(time.time()-start_time))
-        attention_bias.attention_bias = None
 
                     
     # For InferKit web API

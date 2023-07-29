@@ -308,7 +308,14 @@ border-top-right-radius: var(--tabs_rounding);
 }
 
 #story_menu_context textarea {
-	height: 25vh;
+	height: 10vh;
+	min-height: 100px;
+	transition: height 0.3s;
+	resize: none;
+}
+
+#story_menu_context textarea:focus {
+	height: 35vh;
 }
 
 .flyout_menu_contents label {
@@ -327,7 +334,7 @@ border-top-right-radius: var(--tabs_rounding);
 
 .menu-section:before {
 	/* Underline/seperator/fake hr type scenario */
-	content : "";
+	content: "";
 	position: absolute;
 
 	left: calc(var(--the-part-someone-ate-off) / 2);
@@ -340,6 +347,11 @@ border-top-right-radius: var(--tabs_rounding);
 	themesters so we don't have to rely on cheap opacity hacks to make it look
 	acceptable in most themes */
 	border-bottom: 2px solid rgba(177, 177, 177, 0.1);
+}
+
+.menu-section:last-child:before {
+	/* Don't show section divider below last section */
+	display: none;
 }
 
 .menu-section#author_notes input

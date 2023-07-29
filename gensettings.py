@@ -583,6 +583,23 @@ gensettingstf = [
     "ui_level": 2
  	},
     {
+    "UI_V2_Only": True,
+ 	"uitype": "slider",
+ 	"unit": "int",
+ 	"label": "Guidance Strength",
+ 	"id": "cfg_scale",
+ 	"min": 0,
+ 	"max": 6,
+ 	"step": 0.1,
+ 	"default": 0,
+	"tooltip": "Strength of applied Classifier-Free Guidance. As the value increases, the adherance to the CFG prompt increases.",
+    "menu_path": "context",
+    "sub_path": "cfg",
+    "classname": "story",
+    "name": "cfg_scale",
+    "ui_level": 2
+ 	},
+    {
 	"uitype": "toggle",
 	"unit": "bool",
 	"label": "Show Field Budget",

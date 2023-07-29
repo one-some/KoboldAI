@@ -10,7 +10,7 @@
 			<div class="help_text">
 				Important information the AI should always keep in mind.
 			</div>
-			<textarea rows=20 id="memory" class="var_sync_story_memory var_sync_alt_story_memory_length fullwidth" onchange='sync_to_server(this);' oninput="autoResize(this)" autocomplete="off"></textarea>
+			<textarea rows=20 id="memory" class="var_sync_story_memory var_sync_alt_story_memory_length fullwidth" onchange='sync_to_server(this);' autocomplete="off"></textarea>
 		</div>
 		<div id="author_notes" class="menu-section">
 			<h4 class="section_header">Author's Note</h4>
@@ -21,11 +21,28 @@
 			<label for="authors_notes_template">Template:</label>
 			<input autocomplete="off" id=authors_notes_template type=text placeholder="[Author's note: <|>]" class="var_sync_story_authornotetemplate fullwidth" onchange='sync_to_server(this);'>
 			<label for="authors_notes">Author's Notes:</label>
-			<textarea autocomplete="off" rows=16 id="authors_notes" class="var_sync_story_authornote var_sync_alt_story_authornote_length fullwidth" oninput="autoResize(this)" onchange='sync_to_server(this);'></textarea>
+			<textarea autocomplete="off" id="authors_notes" class="var_sync_story_authornote var_sync_alt_story_authornote_length fullwidth" onchange='sync_to_server(this);'></textarea>
 
 			<div class="setting_tile_area">
 				{% with menu='author_notes' %}
 					{% with sub_path='' %}
+						{% include 'settings item.html' %}
+					{% endwith %}
+				{% endwith %}
+			</div>
+		</div>
+
+		<div id="cfg-menu-section" class="menu-section">
+			<h4 class="section_header">Classifier-Free Guidance</h4>
+			<div class="help_text">A different type of prompt to keep the AI on track.</div>
+			<textarea
+				autocomplete="off"
+				class="var_sync_story_cfg_prompt fullwidth"
+				onchange="sync_to_server(this);"
+			></textarea>
+			<div class="setting_tile_area">
+				{% with menu='context' %}
+					{% with sub_path='cfg' %}
 						{% include 'settings item.html' %}
 					{% endwith %}
 				{% endwith %}
@@ -37,12 +54,7 @@
 			<div class="help_text">Styles the AI will attempt to imitate. Effectiveness depends on model.</div>
 			<input id="genre-input" class="fullwidth" placeholder="Fantasy" autocomplete="off" spellcheck="false">
 			<div id="genre-suggestion-super-container">
-				<div id="genre-suggestion-container">
-					<span class="genre-suggestion">Animals</span>
-					<span class="genre-suggestion">Amish</span>
-					<span class="genre-suggestion">Asian</span>
-					<span class="genre-suggestion">Buddhist</span>
-				</div>
+				<div id="genre-suggestion-container"></div>
 			</div>
 			<div id="genre-container"></div>
 		</div>
@@ -53,7 +65,7 @@
 				What the system would use for automatic memory summarized from the game
 			</div>
 			<button class="settings_button" onclick="socket.emit('refresh_auto_memory', {});">Generate</button>
-			<textarea rows=20 id="auto_memory" class="var_sync_story_auto_memory fullwidth" oninput="autoResize(this)" autocomplete="off"></textarea>
+			<textarea rows=20 id="auto_memory" class="var_sync_story_auto_memory fullwidth" autocomplete="off"></textarea>
 		</div>
 	</div>
 

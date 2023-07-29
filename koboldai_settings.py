@@ -918,6 +918,9 @@ class story_settings(settings):
         
         self.save_paths = SavePaths(os.path.join("stories", self.story_name or "Untitled"))
 
+        self.cfg_prompt = ""
+        self.cfg_scale = 0.0
+
         ################### must be at bottom #########################
         self.no_save = False  #Temporary disable save (doesn't save with the file)
     

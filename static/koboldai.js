@@ -4983,10 +4983,10 @@ function selectTab(tab) {
 	let tabTarget = document.getElementById(tab.getAttribute("tab-target"));
 	let tabClass = Array.from(tab.classList).filter((c) => c.startsWith("tab-"))[0];
 	let targetClass = Array.from(tabTarget.classList).filter((c) => c.startsWith("tab-target-"))[0];
-	
+
 	$(`.${tabClass}`).removeClass("selected");
 	tab.classList.add("selected");
-	
+
 	$(`.${targetClass}`).addClass("hidden");
 	tabTarget.classList.remove("hidden");
 }

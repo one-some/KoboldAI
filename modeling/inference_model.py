@@ -583,6 +583,9 @@ class InferenceModel:
         assert isinstance(prompt_tokens, np.ndarray)
         assert len(prompt_tokens.shape) == 1
 
+        for processor in self.logits_processors:
+            processor._pre_generate(self)
+
         time_start = time.time()
 
         with use_core_manipulations():

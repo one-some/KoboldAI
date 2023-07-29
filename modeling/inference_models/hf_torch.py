@@ -6,7 +6,6 @@ import time
 import bisect
 import itertools
 import traceback
-import contextlib
 from torch import nn
 from typing import Dict, List, Optional, Union
 
@@ -28,7 +27,7 @@ import utils
 import modeling.lazy_loader as lazy_loader
 from logger import logger, Colors
 
-from modeling import warpers
+from modeling import warpers, logits_processors
 from modeling.warpers import Warper
 from modeling.stoppers import Stoppers
 from modeling.post_token_hooks import PostTokenHooks
@@ -93,6 +92,10 @@ class HFTorchInferenceModel(HFInferenceModel):
         self.lazy_load = True
         self.low_mem = False
         self.nobreakmodel = False
+
+        self.logits_processors = [
+            logits_processors.ClassifierFreeGuidance()
+        ] + self.logits_processors
 
         self.post_token_hooks = [
             PostTokenHooks.stream_tokens,
@@ -240,13 +243,14 @@ class HFTorchInferenceModel(HFInferenceModel):
                 *args,
                 **kwargs,
             ):
-                scores = m_self._apply_warpers(scores=scores, input_ids=input_ids)
-
                 for processor in m_self.logits_processors:
                     scores = processor(m_self, scores=scores, input_ids=input_ids)
                     assert (
                         scores is not None
                     ), f"Scores are None; processor '{processor}' is to blame"
+                
+                # EXPERIMENT: MOVE THIS BACK!!
+                scores = m_self._apply_warpers(scores=scores, input_ids=input_ids)
                 return scores
 
         def new_sample(self, *args, **kwargs):

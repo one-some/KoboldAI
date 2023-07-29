@@ -1,21 +1,25 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
 import torch
 from torch.nn import functional as F
 
 import utils
 
 # Weird annotations to avoid cyclic import
-from modeling import inference_model
+if TYPE_CHECKING:
+    from modeling.inference_model import InferenceModel
 
+class LogitsProcessor:
+    def _pre_generate(self, model: InferenceModel) -> None:
+        pass
 
-class ProbabilityVisualization:
+class ProbabilityVisualization(LogitsProcessor):
     def __call__(
         self,
-        model: inference_model.InferenceModel,
+        model: InferenceModel,
         scores: torch.FloatTensor,
-        input_ids: torch.longLongTensor,
+        input_ids: torch.LongTensor,
     ) -> torch.FloatTensor:
         assert scores.ndim == 2
 
@@ -74,12 +78,12 @@ class ProbabilityVisualization:
         return scores
 
 
-class LuaIntegration:
+class LuaIntegration(LogitsProcessor):
     def __call__(
         self,
-        model: inference_model.InferenceModel,
+        model: InferenceModel,
         scores: torch.FloatTensor,
-        input_ids: torch.longLongTensor,
+        input_ids: torch.LongTensor,
     ) -> torch.FloatTensor:
         assert scores.ndim == 2
         assert input_ids.ndim == 2
@@ -115,7 +119,7 @@ class LuaIntegration:
         return scores
 
 
-class PhraseBiasLogitsProcessor:
+class PhraseBiasLogitsProcessor(LogitsProcessor):
     def __init__(self) -> None:
         # Hack
         self.model = None
@@ -256,9 +260,9 @@ class PhraseBiasLogitsProcessor:
 
     def __call__(
         self,
-        model: inference_model.InferenceModel,
+        model: InferenceModel,
         scores: torch.FloatTensor,
-        input_ids: torch.longLongTensor,
+        input_ids: torch.LongTensor,
     ) -> torch.FloatTensor:
         self.model = model
 
@@ -280,3 +284,81 @@ class PhraseBiasLogitsProcessor:
                     scores[batch][token] += bias
 
         return scores
+
+
+class ClassifierFreeGuidance(LogitsProcessor):
+    """Classifier-Free Guidance (https://arxiv.org/pdf/2306.17806.pdf)
+    Implementation from https://github.com/huggingface/transformers/pull/24654"""
+
+    def _pre_generate(self, model: InferenceModel) -> None:
+        # TODO: TOKENIZE
+        in_ids = torch.tensor(
+            [model.tokenizer.encode(utils.koboldai_vars.cfg_prompt)] * utils.koboldai_vars.numseqs,
+            device=model.get_auxilary_device()
+        ) if utils.koboldai_vars.cfg_prompt else None
+        self.unconditional_context = {
+            "input_ids": in_ids,
+            "attention_mask": None,
+            "use_cache": True,
+            "past_key_values": None,
+            "first_pass": True,
+        }
+
+
+    def __call__(
+        self,
+        model: InferenceModel,
+        scores: torch.FloatTensor,
+        input_ids: torch.LongTensor,
+    ) -> torch.FloatTensor:
+        scores = torch.nn.functional.log_softmax(scores, dim=-1)
+
+        guidance_scale = utils.koboldai_vars.cfg_scale
+
+        if guidance_scale == 1.0:
+            return scores
+
+        print("TOTAL! @", guidance_scale, "with", self.unconditional_context["input_ids"])
+
+        logits = self.get_unconditional_logits(input_ids, model)
+
+        unconditional_logits = torch.nn.functional.log_softmax(logits[:, -1], dim=-1)
+        out = guidance_scale * (scores - unconditional_logits) + unconditional_logits
+        return out
+
+
+    def get_unconditional_logits(self, input_ids, model):
+        if self.unconditional_context["first_pass"]:
+            if self.unconditional_context["input_ids"] is None:
+                self.unconditional_context["input_ids"] = input_ids[:, -1:]
+            if self.unconditional_context["attention_mask"] is None:
+                self.unconditional_context["attention_mask"] = torch.ones_like(
+                    self.unconditional_context["input_ids"], dtype=torch.long
+                )
+            input_ids = self.unconditional_context["input_ids"]
+            attention_mask = self.unconditional_context["attention_mask"]
+            self.unconditional_context["first_pass"] = False
+        else:
+            attention_mask = torch.cat(
+                [
+                    self.unconditional_context["attention_mask"],
+                    torch.ones_like(input_ids[:, -1:], dtype=torch.long),
+                ],
+                dim=1,
+            )
+            if not self.unconditional_context["use_cache"]:
+                input_ids = torch.cat([self.unconditional_context["input_ids"], input_ids[:, -1:]], dim=1)
+            else:
+                input_ids = input_ids[:, -1:]
+            self.unconditional_context["input_ids"] = input_ids
+            self.unconditional_context["attention_mask"] = attention_mask
+
+        out = model.model(
+            input_ids,
+            attention_mask=attention_mask,
+            use_cache=self.unconditional_context["use_cache"],
+            past_key_values=self.unconditional_context["past_key_values"],
+        )
+        self.unconditional_context["past_key_values"] = out.get("past_key_values", None)
+
+        return out.logits

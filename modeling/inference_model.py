@@ -14,6 +14,7 @@ from transformers import (
 )
 from modeling.tokenizer import GenericTokenizer
 from modeling import logits_processors
+from modeling.user_sampler import UserSampler
 
 import utils
 
@@ -166,6 +167,7 @@ class InferenceModel:
             logits_processors.LuaIntegration(),
             logits_processors.PhraseBiasLogitsProcessor(),
             logits_processors.ProbabilityVisualization(),
+            UserSampler(),
         ]
         self.tokenizer = None
         self.capabilties = ModelCapabilities()

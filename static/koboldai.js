@@ -38,6 +38,7 @@ socket.on("scratchpad_response", recieveScratchpadResponse);
 socket.on("show_error_notification", function(data) { reportError(data.title, data.text) });
 socket.on("generated_wi", showGeneratedWIData);
 socket.on("stream_tokens", stream_tokens);
+socket.on("user_sampler_options", show_user_sampler_options);
 //socket.onAny(function(event_name, data) {console.log({"event": event_name, "class": data.classname, "data": data});});
 
 // Must be done before any elements are made; we track their changes.
@@ -7671,3 +7672,26 @@ gameText.addEventListener("paste", function(event) {
 
 	check_game_after_paste();
 });
+
+/* User Sampler */
+function show_user_sampler_options(data) {
+	const containerEl = $el("#user-sampler");
+	containerEl.classList.remove("hidden");
+
+	for (const optionEl of document.querySelectorAll(".us-option")) {
+		optionEl.remove();
+	}
+
+	for (const [tokenId, tokenData] of Object.entries(data)) {
+		const optionEl = $e("div", containerEl, {classes: ["us-option"]});
+		const decodedEl = $e("span", optionEl, {classes: ["us-dec"], innerText: tokenData.dec});
+		const scoreEl = $e("span", optionEl, {classes: ["us-score"], innerText: tokenData.score});
+
+		optionEl.addEventListener("click", function() {
+			console.log(tokenId)
+			socket.emit("user_sampler_choose", tokenId);
+			containerEl.classList.add("hidden");
+		});
+	}
+	// console.log(data.value);
+}

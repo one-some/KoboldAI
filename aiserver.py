@@ -622,6 +622,7 @@ utils.socketio = socketio
 
 # Weird import position to steal koboldai_vars from utils
 from modeling.patches import patch_transformers
+from modeling import user_sampler
 
 #Load all of the model importers
 import importlib
@@ -8008,6 +8009,11 @@ def show_vars():
 @logger.catch
 def trigger_error(data):
     temp = this_var_doesnt_exist
+
+@socketio.on("user_sampler_choose")
+@logger.catch
+def user_sample_choose(data):
+    user_sampler.user_sampler_queue.put(data)
 
 #==================================================================#
 class EmptySchema(KoboldSchema):

@@ -287,7 +287,7 @@ border-top-right-radius: var(--tabs_rounding);
 	display: none;
 }
 
-#story_menu_author .setting_container {
+#story_menu_context .setting_container {
 	display: grid;
 	grid-template-areas: "label value"
 						 "item item"
@@ -303,9 +303,55 @@ border-top-right-radius: var(--tabs_rounding);
 	flex-grow: 1;
 }
 
-#story_menu_author .setting_tile_area{
+#story_menu_context .setting_tile_area {
 	padding: 0;
 }
+
+#story_menu_context textarea {
+	height: 25vh;
+}
+
+.flyout_menu_contents label {
+	margin-bottom: 0px;
+}
+
+.menu-section {
+	position: relative;
+
+	padding-bottom: 16px;
+	padding-top: 12px;
+
+	/* Should be even */
+	--the-part-someone-ate-off: 24px;
+}
+
+.menu-section:before {
+	/* Underline/seperator/fake hr type scenario */
+	content : "";
+	position: absolute;
+
+	left: calc(var(--the-part-someone-ate-off) / 2);
+	bottom: 0px;
+
+	height: 1px;
+	width: calc(100% - var(--the-part-someone-ate-off));
+
+	/* TODO: Add a proper `input-border` variable or something like for the
+	themesters so we don't have to rely on cheap opacity hacks to make it look
+	acceptable in most themes */
+	border-bottom: 2px solid rgba(177, 177, 177, 0.1);
+}
+
+.menu-section#author_notes input
+.menu-section#author_notes label {
+	display: block;
+}
+
+.menu-section#author_notes label {
+	margin-top: 2px;
+	user-select: none;
+}
+.menu-section#author_notes input { margin-bottom: 5px; }
 
 
 .setting_container_single {
@@ -3564,7 +3610,10 @@ h2 .material-icons-outlined {
 
 .section_header {
 	margin-left: 2px;
-	margin-bottom: 2px;
+	margin-bottom: 3px;
+	/* Top margin handled by `.menu-section` */
+	margin-top: 0px;
+	font-weight: bold;
 }
 
 .help_text {

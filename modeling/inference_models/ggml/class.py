@@ -19,7 +19,7 @@ from modeling.inference_model import (
     InferenceModel,
 )
 
-model_backend_name = "ggml" #should this be koboldcpp? but model_backend seems to want this
+model_backend_name = "koboldcpp" #specific instead of ggml
 model_backend_type = "ggml" #This should be a generic name in case multiple model backends are compatible (think Hugging Face Custom and Basic Hugging Face)
 
 kcpp_backend_loaded = False

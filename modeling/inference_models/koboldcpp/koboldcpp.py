@@ -87,7 +87,7 @@ def pick_existant_file(ntoption,nonntoption):
             return ntoption
         return nonntoption
 
-lib_default = pick_existant_file("koboldcpp_win.dll","koboldcpp_linux.so")
+lib_default = pick_existant_file("koboldcpp_default.dll","koboldcpp_default.so")
 lib_failsafe = pick_existant_file("koboldcpp_failsafe.dll","koboldcpp_failsafe.so")
 lib_openblas = pick_existant_file("koboldcpp_openblas.dll","koboldcpp_openblas.so")
 lib_noavx2 = pick_existant_file("koboldcpp_noavx2.dll","koboldcpp_noavx2.so")
@@ -292,6 +292,7 @@ def utfprint(str):
     except UnicodeEncodeError:
         # Replace or omit the problematic character
         utf_string = str.encode('ascii', 'ignore').decode('ascii')
+        utf_string = utf_string.replace('\a', '') #remove bell characters
         print(utf_string)
 
 #################################################################
@@ -304,7 +305,7 @@ maxhordectx = 1024
 maxhordelen = 256
 modelbusy = threading.Lock()
 defaultport = 5001
-KcppVersion = "1.40.1"
+KcppVersion = "1.41"
 showdebug = True
 showsamplerwarning = True
 showmaxctxwarning = True

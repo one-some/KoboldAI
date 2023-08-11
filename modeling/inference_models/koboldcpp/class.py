@@ -9,6 +9,7 @@ import requests
 import numpy as np
 from typing import List, Optional, Union
 import os
+from . import koboldcpp
 
 import utils
 from logger import logger
@@ -51,15 +52,10 @@ class model_backend(InferenceModel):
     def set_input_parameters(self, parameters):
         pass
 
-    def import_koboldcpp(self):
-        from . import koboldcpp
-        return koboldcpp
-
     def _load(self, save_model: bool, initial_load: bool) -> None:
         global kcpp_backend_loaded
         self.tokenizer = self._get_tokenizer("gpt2")
         if not kcpp_backend_loaded:
-            self.kcpp = self.import_koboldcpp() #import on demand
             kcppargs = KcppArgsObject(model=self.filename, model_param=self.filename,
             port=5001, port_param=5001, host='', launch=False, lora=None, threads=5, blasthreads=5,
             psutil_set_threads=False, highpriority=False, contextsize=2048,
@@ -68,7 +64,7 @@ class model_backend(InferenceModel):
             usemlock=False, noavx2=False, debugmode=0, skiplauncher=False, hordeconfig=None, noblas=False,
             useclblast=None, usecublas=None, gpulayers=0, tensor_split=None)
 
-            self.kcpp.main(kcppargs,False)
+            koboldcpp.main(kcppargs,False)
             kcpp_backend_loaded = True
         pass
 
@@ -91,7 +87,7 @@ class model_backend(InferenceModel):
         # Store context in memory to use it for comparison with generated content
         utils.koboldai_vars.lastctx = decoded_prompt
 
-        genresult = self.kcpp.generate(decoded_prompt,max_new,utils.koboldai_vars.max_length,
+        genresult = koboldcpp.generate(decoded_prompt,max_new,utils.koboldai_vars.max_length,
         gen_settings.temp,int(gen_settings.top_k),gen_settings.top_a,gen_settings.top_p,
         gen_settings.typical,gen_settings.tfs,gen_settings.rep_pen,gen_settings.rep_pen_range)
 

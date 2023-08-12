@@ -3,21 +3,19 @@
 
 from __future__ import annotations
 
-import time, json
+import time
 import torch
-import requests
 import numpy as np
+from threading import Thread
 from typing import List, Optional, Union
-import os
-from . import koboldcpp
 
 import utils
-from logger import logger
 from modeling.inference_model import (
     GenerationResult,
     GenerationSettings,
     InferenceModel,
 )
+from . import koboldcpp
 
 model_backend_name = "koboldcpp" #specific instead of ggml
 model_backend_type = "ggml" #This should be a generic name in case multiple model backends are compatible (think Hugging Face Custom and Basic Hugging Face)
@@ -87,11 +85,70 @@ class model_backend(InferenceModel):
         # Store context in memory to use it for comparison with generated content
         utils.koboldai_vars.lastctx = decoded_prompt
 
-        genresult = koboldcpp.generate(decoded_prompt,max_new,utils.koboldai_vars.max_length,
-        gen_settings.temp,int(gen_settings.top_k),gen_settings.top_a,gen_settings.top_p,
-        gen_settings.typical,gen_settings.tfs,gen_settings.rep_pen,gen_settings.rep_pen_range)
+        outputs = []
 
-        outputs = [genresult]
+        def _gen(outputs):
+            out = koboldcpp.generate(
+                decoded_prompt,
+                max_new,
+                utils.koboldai_vars.max_length,
+                gen_settings.temp,
+                int(gen_settings.top_k),
+                gen_settings.top_a,
+                gen_settings.top_p,
+                gen_settings.typical,
+                gen_settings.tfs,
+                gen_settings.rep_pen,
+                gen_settings.rep_pen_range,
+                stream_sse=True,
+            )
+            outputs.append(out)
+
+        gen_thread = Thread(target=_gen, args=(outputs,))
+
+        # Streaming
+        generated_tokens = []
+        current_token = 0
+        incomplete_token_buffer = bytearray()
+        gen_thread.start()
+
+        # Poll KoboldCpp to check if we've got new tokens
+        while gen_thread.is_alive():
+            if current_token >= koboldcpp.handle.get_stream_count():
+                # Still need to wait
+                time.sleep(0.05)
+                continue
+
+            token_pointer = koboldcpp.handle.new_token(current_token)
+            if token_pointer is None:
+                # Token isn't ready yet, recieved nullpointer
+                continue
+
+            current_token += 1
+            new_byte = koboldcpp.ctypes.string_at(token_pointer)
+            incomplete_token_buffer += bytearray(new_byte)
+
+            try:
+                maybe_decoded_token = incomplete_token_buffer.decode("UTF-8")
+            except UnicodeDecodeError:
+                continue
+
+            incomplete_token_buffer.clear()
+            generated_tokens += self.tokenizer.encode(maybe_decoded_token)
+            self._post_token_gen(torch.Tensor([[[generated_tokens[-1]]]]))
+
+            # prompt_tokens + generated tokens, wrapped in an extra dimension as
+            # we dont support multigen
+            input_ids = torch.IntTensor(prompt_tokens)
+            if generated_tokens:
+                input_ids = torch.cat((input_ids, torch.IntTensor(generated_tokens)))
+            input_ids = input_ids[None, ...]
+            if self._should_stop(input_ids):
+                koboldcpp.handle.abort_generate()
+                break
+
+        gen_thread.join()
+
         return GenerationResult(
             model=self,
             out_batches=np.array(

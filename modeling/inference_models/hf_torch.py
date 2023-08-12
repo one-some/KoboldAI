@@ -95,10 +95,6 @@ class HFTorchInferenceModel(HFInferenceModel):
         self.low_mem = False
         self.nobreakmodel = False
 
-        self.post_token_hooks = [
-            PostTokenHooks.stream_tokens,
-        ]
-
         self.stopper_hooks = [
             Stoppers.core_stopper,
             Stoppers.dynamic_wi_scanner,

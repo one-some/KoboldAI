@@ -172,7 +172,9 @@ class InferenceModel:
 
     def __init__(self) -> None:
         self.gen_state = {}
-        self.post_token_hooks = []
+        self.post_token_hooks = [
+            PostTokenHooks.stream_tokens,
+        ]
         self.stopper_hooks = []
         self.logits_processors = [
             logits_processors.LuaIntegration(),

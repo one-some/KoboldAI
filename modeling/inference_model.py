@@ -176,7 +176,14 @@ class InferenceModel:
         self.post_token_hooks = [
             PostTokenHooks.stream_tokens,
         ]
-        self.stopper_hooks = []
+        self.stopper_hooks = [
+            Stoppers.core_stopper,
+            Stoppers.dynamic_wi_scanner,
+            Stoppers.singleline_stopper,
+            Stoppers.chat_mode_stopper,
+            Stoppers.stop_sequence_stopper,
+        ]
+
         self.logits_processors = [
             logits_processors.LuaIntegration(),
             logits_processors.PhraseBiasLogitsProcessor(),
@@ -671,6 +678,15 @@ class InferenceModel:
     def _post_token_gen(self, input_ids: torch.LongTensor) -> None:
         for hook in self.post_token_hooks:
             hook(self, input_ids)
+
+    def _should_stop(self, input_ids: torch.LongTensor) -> bool:
+        """Checks stopper_hooks in order and returns True immediately if any
+        want to stop generation."""
+        for stopper in self.stopper_hooks:
+            do_stop = stopper(self, input_ids)
+            if do_stop:
+                return True
+        return False
 
     def get_supported_gen_modes(self) -> List[GenerationMode]:
         """Returns a list of compatible `GenerationMode`s for the current model.

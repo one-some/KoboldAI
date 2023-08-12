@@ -6,7 +6,6 @@ import time
 import bisect
 import itertools
 import traceback
-import contextlib
 from torch import nn
 from typing import Dict, List, Optional, Union
 
@@ -30,8 +29,6 @@ from logger import logger, Colors
 
 from modeling import warpers
 from modeling.warpers import Warper
-from modeling.stoppers import Stoppers
-from modeling.post_token_hooks import PostTokenHooks
 from modeling.inference_models.hf import HFInferenceModel
 from modeling.inference_model import (
     GenerationMode,
@@ -94,14 +91,6 @@ class HFTorchInferenceModel(HFInferenceModel):
         self.lazy_load = True
         self.low_mem = False
         self.nobreakmodel = False
-
-        self.stopper_hooks = [
-            Stoppers.core_stopper,
-            Stoppers.dynamic_wi_scanner,
-            Stoppers.singleline_stopper,
-            Stoppers.chat_mode_stopper,
-            Stoppers.stop_sequence_stopper,
-        ]
 
         self.capabilties = ModelCapabilities(
             embedding_manipulation=True,
@@ -197,11 +186,7 @@ class HFTorchInferenceModel(HFInferenceModel):
             ) -> None:
                 m_self._post_token_gen(input_ids)
 
-                for stopper in m_self.stopper_hooks:
-                    do_stop = stopper(m_self, input_ids)
-                    if do_stop:
-                        return True
-                return False
+                return m_self._should_stop(input_ids)
 
         old_gsc = transformers.GenerationMixin._get_stopping_criteria
 

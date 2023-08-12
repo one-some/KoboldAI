@@ -16,6 +16,7 @@ from transformers import (
 )
 from modeling.stoppers import Stoppers
 from modeling.tokenizer import GenericTokenizer
+from modeling.post_token_hooks import PostTokenHooks
 from modeling import logits_processors
 
 import utils

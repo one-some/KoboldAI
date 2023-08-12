@@ -1,7 +1,11 @@
+from __future__ import annotations
 import torch
+from typing import TYPE_CHECKING
 
 import utils
-from modeling.inference_model import InferenceModel
+
+if TYPE_CHECKING:
+    from modeling.inference_model import InferenceModel
 
 
 class PostTokenHooks:

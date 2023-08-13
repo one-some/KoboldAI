@@ -7759,6 +7759,58 @@ async function screenshot_selection(summonEvent) {
 	await showScreenshotWizard(actionComposition, startDebt=startDebt, endDebt=endDebt, totalText);
 }
 
+/* Club Import Listing */
+async function queryPrompts() {
+	const promptContainer = $el("#prompt-browser-prompts");
+
+	const r = await fetch("/importer/club/prompts.json");
+	const j = await r.json();
+
+	for (const prompt of j) {
+		let promptClasses = ["pb-prompt"];
+		const promptEl = $e("div", promptContainer, {classes: promptClasses});
+		// if (prompt.nsfw) promptClasses.push("pb-prompt-nsfw");
+		if (prompt.nsfw) {
+			$e("div", promptEl, {class: "pb-lewd-triangle", tooltip: "NSFW"});
+		}
+
+		const titleEl = $e("span", promptEl, {class: "pb-title", innerText: prompt.title, title: prompt.title});
+
+		const wordCount = prompt.content.replace(/\s\s+/g, ' ').split(" ").length;
+		const wordCountEl = $e("span", promptEl, {class: "pb-wordcount", innerText: `${wordCount} words`});
+		const descEl = $e("span", promptEl, {class: "pb-bigtext", innerText: prompt.desc});
+		const contentEl = $e("span", promptEl, {classes: ["pb-bigtext", "hidden"], innerText: prompt.content});
+
+		const tagContEl = $e("div", promptEl, {class: "pb-tag-cont"});
+		for (const tag of prompt.tags) {
+			const tagEl = $e("span", tagContEl, {class: "pb-tag", innerText: tag});
+		}
+
+		const previewOrImportEl = $e("div", promptEl, {class: "pb-pi-split"});
+		const importButtonEl = $e("span", previewOrImportEl, {class: "pb-import", innerText: "Import"});
+		const previewButtonEl = $e("span", previewOrImportEl, {class: "pb-preview", innerText: "Preview"});
+
+		previewButtonEl.addEventListener("click", function() {
+			// TODO: THIS SUCKS!!!!!!!!!!!!!!! MAKE A MODAL FOR THIS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+			const showDesc = descEl.classList.contains("hidden");
+
+			descEl.classList.toggle("hidden", !showDesc);
+			contentEl.classList.toggle("hidden", showDesc);
+			previewButtonEl.innerText = showDesc ? "Preview" : "Description";
+		});
+		console.log(prompt)
+	}
+}
+
+function showPromptBrowser() {
+	queryPrompts();
+	openPopup("prompt-browser")
+}
+
+showPromptBrowser();
+
+
+// Fix pasting
 $el("#gamescreen").addEventListener("paste", function(event) {
 	// Get rid of rich text, it messes with actions. Not a great fix since it
 	// relies on execCommand but it'll have to do

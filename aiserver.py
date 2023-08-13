@@ -519,11 +519,11 @@ class ImportBuffer:
                 self.world_infos[i][key] = self._replace_placeholders(self.world_infos[i][key])
 
     def from_club(self, club_id):
-        from importers import aetherroom
-        import_data: aetherroom.ImportData
+        from importers.aetherroom import aetherroom_importer
+        import_data: aetherroom_importer.ImportData
         try:
-            import_data = aetherroom.import_scenario(club_id)
-        except aetherroom.RequestFailed as err:
+            import_data = aetherroom_importer.import_scenario(club_id)
+        except aetherroom_importer.RequestFailed as err:
             status = err.status_code
             print(f"[import] Got {status} on request to club :^(")
             message = f"Club responded with {status}"
@@ -7795,6 +7795,15 @@ def UI_2_get_applicable_genres():
         "list": genre_list,
         "init": koboldai_vars.genres,
     }))
+
+@app.route("/importer/club/prompts.json", methods=["GET"])
+@require_allowed_ip
+def UI_2_get_club_prompts():
+    from importers.aetherroom import listing as aetherroom_listing
+    prompts = aetherroom_listing.ClubPromptDB().get_prompts()
+    return jsonify(prompts)
+
+
 #==================================================================#
 # Soft Prompt Tuning
 #==================================================================#

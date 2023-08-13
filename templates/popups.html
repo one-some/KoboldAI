@@ -390,7 +390,25 @@
 			<button type="button" class="btn btn-primary popup_load_cancel_button" onclick="closePopups();">Ok</button>
 		</div>
 	</div>
-	
+
+	<div id="prompt-browser" class="popup-window">
+		<div id="prompt-browser-primary">
+			<div id="prompt-browser-header" class="popup-header">
+				<h3 class="noselect">Prompt Importer</h3>
+				<div id="pb-search-zone">
+					<input id="pb-searchbox" placeholder="Search for prompts..."/>
+					<input id="pb-nsfw-checkbox" type="checkbox">
+					<label for="pb-nsfw-checkbox">No NSFW</label>
+					<!-- <input id="zzz" type="checkbox">
+					<label for="zzz">Filter Short</label> -->
+				</div>
+				<div></div>
+			</div>
+			<div id="prompt-browser-background">
+				<div id="prompt-browser-prompts"></div>
+			</div>
+		</div>
+	</div>
 </div>
 
 <div id="notification-container"></div>

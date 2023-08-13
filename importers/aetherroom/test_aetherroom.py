@@ -1,7 +1,7 @@
 import pytest
 import requests_mock
 
-from importers.aetherroom import (
+from importers.aetherroom.aetherroom_importer import (
     ImportData,
     RequestFailed,
     import_scenario,

@@ -1,4 +1,8 @@
 /*----------------Global Colors------------------*/
+:root {
+	--color-negative: #974040;
+}
+
 @media only screen and (max-aspect-ratio: 5/6) {
 	:root {
 		--flyout_menu_width: 100%;
@@ -1508,6 +1512,164 @@ td.server_vars {
 #privacy_mode input {
 	margin-top: 15px;
 	width: 85%;
+}
+
+/* Club Import Listing */
+#prompt-browser {
+	width: 80%;
+	height: 80%;
+}
+
+#prompt-browser-primary {
+	display: flex;
+	flex-direction: column;
+	width: 100%;
+	height: 100%;
+}
+
+#prompt-browser-header {
+	padding: 5px;
+}
+
+#prompt-browser-background {
+	padding: 5px;
+	overflow-y: auto;
+	background-color: var(--gamescreen_background);
+}
+
+#prompt-browser-prompts {
+	display: grid;
+	gap: 10px;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pb-prompt {
+	display: inline-flex;
+	flex-direction: column;
+	padding: 5px;
+	background-color: var(--button_background);
+	overflow: hidden;
+	position: relative;
+	padding-bottom: 0px;
+	border-radius: 2px;
+}
+
+.pb-title {
+	font-weight: bold;
+	display: block;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-size: 1.2em;
+	padding-left: 3px;
+}
+
+.pb-wordcount {
+	opacity: 0.6;
+	font-size: 0.85em;
+	padding-left: 3px;
+	margin-bottom: 3px;
+}
+
+.pb-bigtext {
+	display: inline-block;
+	padding-left: 5px;
+	padding-right: 8px;
+	max-height: 16vh;
+	overflow-y: scroll;
+	flex-grow: 1;
+
+	line-height: calc(1ex / 0.32);
+}
+
+.pb-bigtext:empty::before {
+	opacity: 0.4;
+	font-style: italic;
+}
+
+.pb-bigtext:empty::before {
+	content: "Nothing here...";
+}
+
+.pb-lewd-triangle {
+	border-width: 0px 30px 30px 0px;
+	border-color: transparent var(--color-negative) transparent transparent;
+	position: absolute;
+	right: 0px;
+	top: 0px;
+	width: 0px;
+	height: 0px;
+	border-style: solid;
+}
+
+.pb-pi-split {
+	display: flex;
+	padding-top: 3px;
+	column-gap: 5px;
+}
+
+.pb-pi-split > * {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+
+	flex: 1 1 0;
+	cursor: pointer;
+	background-color: #ffffff1b;
+	margin-bottom: 3px;
+	height: 28px;
+	font-size: 1.07em;
+	font-weight: bold;
+	border-radius: 2px;
+	user-select: none;
+}
+
+.pb-pi-split > *:hover {
+	background-color: #ffffff0b;
+}
+
+.pb-tag-cont {
+	margin-bottom: 5px;
+}
+
+.pb-tag {
+	display: inline-block;
+	border: 1px solid #ffffff2b;
+	border-radius: 2px;
+	background-color: #ffffff1b;
+	opacity: 0.7;
+	font-size: 0.9em;
+
+	padding: 4px;
+	margin-top: 5px;
+	margin-right: 5px;
+}
+
+#prompt-browser-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+#prompt-browser-header > h3 {
+	margin: 0px;
+}
+
+#pb-search-zone {
+	padding: 3px;
+}
+
+#pb-searchbox {
+	padding: 2px;
+	padding-left: 4px;
+
+	margin-left: -100px;
+	margin-right: 4px;
+
+	width: 30vw;
+	height: 32px;
+	border: 1px solid #30414e;
+	border-radius: 4px;
 }
 
 /* ---------------------------- OVERALL PAGE CONFIG ------------------------------*/
@@ -3071,7 +3233,7 @@ body {
 }
 
 .notification.notification-error .notif-bar {
-	background-color: #974040;
+	background-color: var(--color-negative);
 }
 
 @keyframes shrink-away {
@@ -3096,7 +3258,7 @@ body {
 }
 
 #confirm-deny-button { background-color: var(--button_background); }
-#confirm-confirm-button { background-color: #974040; }
+#confirm-confirm-button { background-color: var(--color-negative); }
 
 .confirm-button {
 	display: inline-flex;

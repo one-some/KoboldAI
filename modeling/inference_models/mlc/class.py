@@ -42,12 +42,16 @@ class model_backend(InferenceModel):
         from mlc_chat import ChatModule, chat_module
 
         def _path(model, model_path, *args, **kwargs):
-            return _path.unpatched(model, "data/mlc-lib", *args, **kwargs)
+            return _path.unpatched(model, "modeling/inference_models/mlc/lib", *args, **kwargs)
 
         _path.unpatched = chat_module._get_lib_module
         chat_module._get_lib_module = _path
 
-        self.model = ChatModule(self.model_path, device="vulkan")
+        try:
+            self.model = ChatModule(self.model_path, device="vulkan")
+        except FileNotFoundError as e:
+            if "the model library" in str(e):
+                raise FileNotFoundError(f"Unable to locate model library for '{self.model_path}'. Have you downloaded the libs to 'modeling/inference_models/mlc/lib'?")
         self.tokenizer = self._get_tokenizer("gpt2")
 
     def _save_settings(self):

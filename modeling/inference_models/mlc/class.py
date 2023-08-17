@@ -16,6 +16,7 @@ from modeling.inference_model import (
 model_backend_name = "mlc"
 model_backend_type = "mlc"
 
+
 class model_backend(InferenceModel):
     def __init__(self) -> None:
         super().__init__()
@@ -38,17 +39,16 @@ class model_backend(InferenceModel):
         pass
 
     def _load(self, save_model: bool, initial_load: bool) -> None:
-        from mlc_chat import ChatModule
-        from mlc_chat import chat_module
+        from mlc_chat import ChatModule, chat_module
 
         def _path(model, model_path, *args, **kwargs):
             return _path.unpatched(model, "data/mlc-lib", *args, **kwargs)
+
         _path.unpatched = chat_module._get_lib_module
         chat_module._get_lib_module = _path
 
         self.model = ChatModule(self.model_path, device="vulkan")
-
-        self.tokenizer = self._get_tokenizer("EleutherAI/gpt-neo-2.7B")
+        self.tokenizer = self._get_tokenizer("gpt2")
 
     def _save_settings(self):
         pass
@@ -66,24 +66,34 @@ class model_backend(InferenceModel):
         from mlc_chat.chat_module import ChatConfig
 
         if seed is not None:
-            logger.warning(
-                "Seed is unsupported on MLC backend. Seed will be ignored."
-            )
+            logger.warning("Seed is unsupported on MLC backend. Seed will be ignored.")
 
         decoded_prompt = utils.decodenewlines(self.tokenizer.decode(prompt_tokens))
 
         # Store context in memory to use it for comparison with generated content
         utils.koboldai_vars.lastctx = decoded_prompt
 
-        self.model.reset_chat()
-        self.model.chat_config.max_gen_len = max_new
+        self.model.reset_chat(ChatConfig(max_gen_len=max_new, conv_template="LM"))
         self.model._prefill(decoded_prompt, decode_next_token=True)
 
-        decoded_output = ""
+        old_len = 0
         while not self.model._stopped():
-            self.model._decode()
             decoded_output = self.model._get_message()
-            print(decoded_output)
+            new_bit = decoded_output[old_len:]
+            old_len = len(decoded_output)
+
+            # HACK: Bypass post token hooks for token streaming since tokenizer
+            # differences mess with our internal token hook model
+            data = [
+                utils.applyoutputformatting(
+                    utils.decodenewlines(new_bit),
+                    no_sentence_trimming=True,
+                    no_single_line=True,
+                )
+            ]
+            utils.koboldai_vars.actions.stream_tokens(data)
+
+            self.model._decode()
 
         genout = [decoded_output]
 

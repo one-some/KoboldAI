@@ -12,8 +12,6 @@ import random
 import shutil
 import eventlet
 
-from modeling.inference_model import GenerationMode
-
 eventlet.monkey_patch(all=True, thread=False, os=False)
 import os, inspect, contextlib, pickle
 os.system("")
@@ -21,6 +19,8 @@ __file__ = os.path.dirname(os.path.realpath(__file__))
 os.chdir(__file__)
 os.environ['EVENTLET_THREADPOOL_SIZE'] = '1'
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "true"
+os.environ["DISABLE_TELEMETRY"] = "true"
 from eventlet import tpool
 
 import logging
@@ -74,6 +74,7 @@ import transformers
 import ipaddress
 from functools import wraps
 from modeling.pickling import RestrictedUnpickler, use_custom_unpickler
+from modeling.inference_model import GenerationMode
 
 # Make settings folder early so we can depend on it anywhere
 if not os.path.exists("settings/"):

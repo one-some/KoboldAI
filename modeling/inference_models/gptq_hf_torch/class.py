@@ -5,14 +5,11 @@ import glob
 import json
 import torch
 import re
-import shutil
-import sys
-from typing import Dict, Union
 
 import utils
 import modeling.lazy_loader as lazy_loader
 import koboldai_settings
-from logger import logger, set_logger_verbosity
+from logger import logger
 
 from modeling.inference_models.hf_torch import HFTorchInferenceModel
 from modeling.tokenizer import GenericTokenizer
@@ -362,7 +359,7 @@ class model_backend(HFTorchInferenceModel):
                         model = load_quant_offload_device_map(llama_load_quant, location, gptq_file, gptq_bits, gptq_groupsize, device_map, force_bias=v2_bias)
                     elif model_type == "opt":
                         model = load_quant_offload_device_map(opt_load_quant, location, gptq_file, gptq_bits, gptq_groupsize, device_map, force_bias=v2_bias)
-                    elif model_tseype == "mpt":
+                    elif model_type == "mpt":
                         model = load_quant_offload_device_map(mpt_load_quant, location, gptq_file, gptq_bits, gptq_groupsize, device_map, force_bias=v2_bias)
                     elif model_type == "gpt_bigcode":
                         model = load_quant_offload_device_map(bigcode_load_quant, location, gptq_file, gptq_bits, gptq_groupsize, device_map, force_bias=v2_bias).half()
@@ -370,7 +367,7 @@ class model_backend(HFTorchInferenceModel):
                         raise RuntimeError("Model not supported by Occam's GPTQ")
                 except:
                     self.implementation = "AutoGPTQ"
-                    
+
             if self.implementation == "AutoGPTQ":
                 try:
                     import auto_gptq
@@ -383,7 +380,7 @@ class model_backend(HFTorchInferenceModel):
                 auto_gptq.modeling._base.AutoConfig = hf_bleeding_edge.AutoConfig
                 auto_gptq.modeling._base.AutoModelForCausalLM = hf_bleeding_edge.AutoModelForCausalLM
 
-                autogptq_failed = False 
+                autogptq_failed = False
                 try:
                     model = AutoGPTQForCausalLM.from_quantized(location, model_basename=Path(gptq_file).stem, use_safetensors=gptq_file.endswith(".safetensors"), device_map=device_map)
                 except:

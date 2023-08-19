@@ -85,7 +85,7 @@ class model_backend(HFTorchInferenceModel):
         # behavior consistent with other loading methods - Henk717
         # if utils.koboldai_vars.model not in ["NeoCustom", "GPT2Custom"]:
         #     utils.koboldai_vars.custmodpth = utils.koboldai_vars.model
-        
+
         if self.model_name == "NeoCustom":
             self.model_name = os.path.basename(os.path.normpath(self.path))
         utils.koboldai_vars.model = self.model_name
@@ -103,7 +103,7 @@ class model_backend(HFTorchInferenceModel):
         tf_kwargs = {
             "low_cpu_mem_usage": True,
         }
-        
+
         if self.quantization == "8bit":
             tf_kwargs.update({
                 "quantization_config":BitsAndBytesConfig(

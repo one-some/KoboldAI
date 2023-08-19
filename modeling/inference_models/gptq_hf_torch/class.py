@@ -5,16 +5,17 @@ import glob
 import json
 import torch
 import re
+from pathlib import Path
 
 import utils
-import modeling.lazy_loader as lazy_loader
 import koboldai_settings
 from logger import logger
 
+from modeling import patches
+from modeling import downloader
+from modeling import lazy_loader
 from modeling.inference_models.hf_torch import HFTorchInferenceModel
 from modeling.tokenizer import GenericTokenizer
-
-from pathlib import Path
 
 
 model_backend_type = "GPTQ"
@@ -59,6 +60,7 @@ def get_gptq_version(fpath):
     v2_strings = ["qzeros", "scales", "bias", "qweight"]
     v3_strings = ["qzeros", "scales", "g_idx", "qweight"]
 
+    print(fpath)
     with open(fpath, "rb") as f:
         data = str(f.read(1024*1024))
 
@@ -230,8 +232,11 @@ class model_backend(HFTorchInferenceModel):
             from huggingface_hub import snapshot_download
             target_dir = "models/" + self.model_name.replace("/", "_")
             print(self.model_name)
-            snapshot_download(self.model_name, local_dir=target_dir, local_dir_use_symlinks=False, cache_dir="cache/", revision=utils.koboldai_vars.revision)
-        
+            print("PRE")
+            downloader.aria2_snapshot(self.model_name, revision=utils.koboldai_vars.revision, target_dir=target_dir)
+            print("POST")
+            # snapshot_download(self.model_name, local_dir=target_dir, local_dir_use_symlinks=False, cache_dir="cache/", revision=utils.koboldai_vars.revision)
+
         self.model = self._get_model(self.get_local_model_path())
         self.tokenizer = self._get_tokenizer(self.get_local_model_path())
 

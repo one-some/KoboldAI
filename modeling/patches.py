@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List
+from types import ModuleType
 from tqdm.auto import tqdm
 
 import transformers
@@ -15,12 +16,12 @@ import modeling
 import utils
 
 
-def patch_transformers_loader() -> None:
+def patch_transformers_loader(ptm = PreTrainedModel, m_utils = modeling_utils) -> None:
     """
     Patch the Transformers loader to use aria2 and our shard tracking.
     Universal for TPU/MTJ and Torch.
     """
-    old_from_pretrained = PreTrainedModel.from_pretrained.__func__
+    old_from_pretrained = ptm.from_pretrained.__func__
 
     @classmethod
     def new_from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
@@ -37,12 +38,12 @@ def patch_transformers_loader() -> None:
             cls, pretrained_model_name_or_path, *model_args, **kwargs
         )
 
-    if not hasattr(PreTrainedModel, "_kai_patched"):
-        PreTrainedModel.from_pretrained = new_from_pretrained
-        PreTrainedModel._kai_patched = True
+    if not hasattr(ptm, "_kai_patched"):
+        ptm.from_pretrained = new_from_pretrained
+        ptm._kai_patched = True
 
-    if hasattr(modeling_utils, "get_checkpoint_shard_files"):
-        old_get_checkpoint_shard_files = modeling_utils.get_checkpoint_shard_files
+    if hasattr(m_utils, "get_checkpoint_shard_files"):
+        old_get_checkpoint_shard_files = m_utils.get_checkpoint_shard_files
 
         def new_get_checkpoint_shard_files(
             pretrained_model_name_or_path, index_filename, *args, **kwargs
@@ -53,7 +54,7 @@ def patch_transformers_loader() -> None:
                 pretrained_model_name_or_path, index_filename, *args, **kwargs
             )
 
-        modeling_utils.get_checkpoint_shard_files = new_get_checkpoint_shard_files
+        m_utils.get_checkpoint_shard_files = new_get_checkpoint_shard_files
 
 
 def patch_transformers_generation() -> None:

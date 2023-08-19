@@ -7,7 +7,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Union
+from typing import List, Optional, Union
 from urllib.error import HTTPError
 
 import huggingface_hub
@@ -16,6 +16,7 @@ import torch
 import transformers.configuration_utils
 import transformers.file_utils
 import transformers.modeling_utils
+from huggingface_hub.hf_api import HfApi
 from tqdm.auto import tqdm
 
 import utils
@@ -54,13 +55,15 @@ def detect_fp32() -> None:
 def copy_fp16_transformers_files(model: InferenceModel) -> None:
     # For fp16 models, we can just copy the model files directly
 
+    revision = utils.koboldai_vars.revision or huggingface_hub.constants.DEFAULT_REVISION
+
     # Save the config.json
     shutil.move(
         os.path.realpath(
             huggingface_hub.hf_hub_download(
                 model.model_name,
                 transformers.configuration_utils.CONFIG_NAME,
-                revision=utils.koboldai_vars.revision,
+                revision=revision,
                 cache_dir="cache",
                 local_files_only=True,
                 legacy_cache_layout=False,
@@ -87,7 +90,7 @@ def copy_fp16_transformers_files(model: InferenceModel) -> None:
                         huggingface_hub.hf_hub_download(
                             model.model_name,
                             possible_checkpoint_name,
-                            revision=utils.koboldai_vars.revision,
+                            revision=revision,
                             cache_dir="cache",
                             local_files_only=True,
                             legacy_cache_layout=False,
@@ -127,7 +130,7 @@ def copy_fp16_transformers_files(model: InferenceModel) -> None:
                     huggingface_hub.hf_hub_download(
                         model.model_name,
                         filename,
-                        revision=utils.koboldai_vars.revision,
+                        revision=revision,
                         cache_dir="cache",
                         local_files_only=True,
                         legacy_cache_layout=False,
@@ -215,6 +218,25 @@ def patch_hf_hub_downloader():
     huggingface_hub.file_download.http_get = http_get
 
 
+def is_hf_file_cached(
+    pretrained_model_name_or_path: str,
+    filename: str,
+    cache_dir: str,
+    revision: str,
+):
+    try:
+        huggingface_hub.hf_hub_download(
+            pretrained_model_name_or_path,
+            filename,
+            cache_dir=cache_dir,
+            local_files_only=True,
+            revision=revision,
+        )
+    except ValueError:
+        return False
+    return True
+
+
 def aria2_hook(
     pretrained_model_name_or_path: str,
     force_download=False,
@@ -231,7 +253,10 @@ def aria2_hook(
     import transformers.modeling_utils
     from huggingface_hub import HfFolder
 
-    _revision = utils.koboldai_vars.revision or huggingface_hub.constants.DEFAULT_REVISION
+    revision = revision or huggingface_hub.constants.DEFAULT_REVISION
+    _revision = (
+        utils.koboldai_vars.revision or huggingface_hub.constants.DEFAULT_REVISION
+    )
 
     if not shutil.which("aria2c"):
         # Don't do anything if aria2 is not installed
@@ -281,19 +306,6 @@ def aria2_hook(
     )
     os.makedirs(storage_folder, exist_ok=True)
 
-    def is_cached(filename):
-        try:
-            huggingface_hub.hf_hub_download(
-                pretrained_model_name_or_path,
-                filename,
-                cache_dir=cache_dir,
-                local_files_only=True,
-                revision=revision,
-            )
-        except ValueError:
-            return False
-        return True
-
     filename = None
 
     # NOTE: For now sharded Safetensors models are not supported. Haven't seen
@@ -310,9 +322,9 @@ def aria2_hook(
             pretrained_model_name_or_path, possible_filename, revision=_revision
         )
 
-        if is_cached(possible_filename) or requests.head(
-            url, allow_redirects=True, proxies=proxies, headers=headers
-        ):
+        if is_hf_file_cached(
+            pretrained_model_name_or_path, possible_filename, cache_dir, revision
+        ) or requests.head(url, allow_redirects=True, proxies=proxies, headers=headers):
             filename = possible_filename
             break
 
@@ -341,100 +353,125 @@ def aria2_hook(
         with open(map_filename) as f:
             map_data = json.load(f)
         filenames = set(map_data["weight_map"].values())
+    aria2_download_hf_filenames(
+        pretrained_model_name_or_path,
+        filenames,
+        storage_folder,
+        revision=_revision,
+        force_download=force_download,
+        token=token,
+        use_auth_token=use_auth_token,
+        user_agent=user_agent,
+    )
 
+
+def aria2_download_hf_filenames(
+    repo_id: str,
+    filenames: List[str],
+    target_dir: str,
+    revision: str,
+    force_download: bool = False,
+    cache_dir: str = "cache",
+    token: Optional[str] = None,
+    use_auth_token: bool = False,
+    user_agent: Optional[str] = None,
+) -> None:
     urls = [
-        huggingface_hub.hf_hub_url(pretrained_model_name_or_path, n, revision=_revision)
-        for n in filenames
+        huggingface_hub.hf_hub_url(repo_id, n, revision=revision) for n in filenames
     ]
     if not force_download:
-        urls = [u for u, n in zip(urls, filenames) if not is_cached(n)]
+        urls = [
+            u
+            for u, n in zip(urls, filenames)
+            if not is_hf_file_cached(repo_id, n, cache_dir, revision)
+        ]
         if not urls:
             return
 
     blob_paths = []
 
+    headers = {"user-agent": transformers.file_utils.http_user_agent(user_agent)}
+    if use_auth_token:
+        headers["authorization"] = f"Bearer {token}"
+
     # This section is a modified version of hf_hub_download from huggingface_hub
     # See https://github.com/huggingface/huggingface_hub/blob/main/LICENSE for license
     for u, n in zip(urls, filenames):
         relative_filename = os.path.join(*n.split("/"))
-        if not local_files_only:
+        try:
+            r = huggingface_hub.file_download._request_wrapper(
+                method="HEAD",
+                url=u,
+                headers=headers,
+                allow_redirects=False,
+                follow_relative_redirects=True,
+                proxies=[],
+                timeout=10,
+            )
             try:
-                r = huggingface_hub.file_download._request_wrapper(
-                    method="HEAD",
-                    url=u,
-                    headers=headers,
-                    allow_redirects=False,
-                    follow_relative_redirects=True,
-                    proxies=proxies,
-                    timeout=10,
-                )
-                try:
-                    r.raise_for_status()
-                except HTTPError as e:
-                    error_code = r.headers.get("X-Error-Code")
-                    if error_code != "EntryNotFound":
-                        raise RuntimeError(
-                            f"HEAD {u} failed with error code {r.status_code}"
-                        )
-                    commit_hash = r.headers.get(
-                        huggingface_hub.file_download.HUGGINGFACE_HEADER_X_REPO_COMMIT
+                r.raise_for_status()
+            except HTTPError as e:
+                error_code = r.headers.get("X-Error-Code")
+                if error_code != "EntryNotFound":
+                    raise RuntimeError(
+                        f"HEAD {u} failed with error code {r.status_code}"
                     )
-                    if commit_hash is not None:
-                        no_exist_file_path = (
-                            Path(storage_folder)
-                            / ".no_exist"
-                            / commit_hash
-                            / relative_filename
-                        )
-                        no_exist_file_path.parent.mkdir(parents=True, exist_ok=True)
-                        no_exist_file_path.touch()
-                        huggingface_hub.file_download._cache_commit_hash_for_specific_revision(
-                            storage_folder, _revision, commit_hash
-                        )
-                    raise
-                commit_hash = r.headers[
+                commit_hash = r.headers.get(
                     huggingface_hub.file_download.HUGGINGFACE_HEADER_X_REPO_COMMIT
-                ]
-                if commit_hash is None:
-                    raise OSError(
-                        "Distant resource does not seem to be on huggingface.co (missing"
-                        " commit header)."
+                )
+                if commit_hash is not None:
+                    no_exist_file_path = (
+                        Path(target_dir) / ".no_exist" / commit_hash / relative_filename
                     )
-                etag = r.headers.get(
-                    huggingface_hub.file_download.HUGGINGFACE_HEADER_X_LINKED_ETAG
-                ) or r.headers.get("ETag")
-                # We favor a custom header indicating the etag of the linked resource, and
-                # we fallback to the regular etag header.
-                # If we don't have any of those, raise an error.
-                if etag is None:
-                    raise OSError(
-                        "Distant resource does not have an ETag, we won't be able to"
-                        " reliably ensure reproducibility."
+                    no_exist_file_path.parent.mkdir(parents=True, exist_ok=True)
+                    no_exist_file_path.touch()
+                    huggingface_hub.file_download._cache_commit_hash_for_specific_revision(
+                        target_dir, revision, commit_hash
                     )
-                etag = huggingface_hub.file_download._normalize_etag(etag)
-                # In case of a redirect, save an extra redirect on the request.get call,
-                # and ensure we download the exact atomic version even if it changed
-                # between the HEAD and the GET (unlikely, but hey).
-                # Useful for lfs blobs that are stored on a CDN.
-                if 300 <= r.status_code <= 399:
-                    url_to_download = r.headers["Location"]
-                    if (
-                        "lfs.huggingface.co" in url_to_download
-                        or "lfs-staging.huggingface.co" in url_to_download
-                    ):
-                        # Remove authorization header when downloading a LFS blob
-                        headers.pop("authorization", None)
-            except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
-                # Actually raise for those subclasses of ConnectionError
                 raise
-            except (
-                requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout,
-                huggingface_hub.file_download.OfflineModeIsEnabled,
-            ):
-                # Otherwise, our Internet connection is down.
-                # etag is None
-                pass
+            commit_hash = r.headers[
+                huggingface_hub.file_download.HUGGINGFACE_HEADER_X_REPO_COMMIT
+            ]
+            if commit_hash is None:
+                raise OSError(
+                    "Distant resource does not seem to be on huggingface.co (missing"
+                    " commit header)."
+                )
+            etag = r.headers.get(
+                huggingface_hub.file_download.HUGGINGFACE_HEADER_X_LINKED_ETAG
+            ) or r.headers.get("ETag")
+            # We favor a custom header indicating the etag of the linked resource, and
+            # we fallback to the regular etag header.
+            # If we don't have any of those, raise an error.
+            if etag is None:
+                raise OSError(
+                    "Distant resource does not have an ETag, we won't be able to"
+                    " reliably ensure reproducibility."
+                )
+            etag = huggingface_hub.file_download._normalize_etag(etag)
+            # In case of a redirect, save an extra redirect on the request.get call,
+            # and ensure we download the exact atomic version even if it changed
+            # between the HEAD and the GET (unlikely, but hey).
+            # Useful for lfs blobs that are stored on a CDN.
+            if 300 <= r.status_code <= 399:
+                url_to_download = r.headers["Location"]
+                if (
+                    "lfs.huggingface.co" in url_to_download
+                    or "lfs-staging.huggingface.co" in url_to_download
+                ):
+                    # Remove authorization header when downloading a LFS blob
+                    headers.pop("authorization", None)
+        except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
+            # Actually raise for those subclasses of ConnectionError
+            raise
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            huggingface_hub.file_download.OfflineModeIsEnabled,
+        ):
+            # Otherwise, our Internet connection is down.
+            # etag is None
+            pass
         if etag is None:
             # In those cases, we cannot force download.
             if force_download:
@@ -442,38 +479,28 @@ def aria2_hook(
                     "We have no connection or you passed local_files_only, so"
                     " force_download is not an accepted option."
                 )
-            if huggingface_hub.file_download.REGEX_COMMIT_HASH.match(_revision):
-                commit_hash = _revision
+            if huggingface_hub.file_download.REGEX_COMMIT_HASH.match(revision):
+                commit_hash = revision
             else:
-                ref_path = os.path.join(storage_folder, "refs", _revision)
+                ref_path = os.path.join(target_dir, "refs", revision)
                 with open(ref_path) as f:
                     commit_hash = f.read()
             pointer_path = os.path.join(
-                storage_folder, "snapshots", commit_hash, relative_filename
+                target_dir, "snapshots", commit_hash, relative_filename
             )
             if os.path.exists(pointer_path):
                 return pointer_path
             # If we couldn't find an appropriate file on disk,
             # raise an error.
-            # If files cannot be found and local_files_only=True,
-            # the models might've been found if local_files_only=False
-            # Notify the user about that
-            if local_files_only:
-                raise huggingface_hub.file_download.LocalEntryNotFoundError(
-                    "Cannot find the requested files in the disk cache and"
-                    " outgoing traffic has been disabled. To enable hf.co look-ups"
-                    " and downloads online, set 'local_files_only' to False."
-                )
-            else:
-                raise huggingface_hub.file_download.LocalEntryNotFoundError(
-                    "Connection error, and we cannot find the requested files in"
-                    " the disk cache. Please try again or make sure your Internet"
-                    " connection is on."
-                )
+            raise huggingface_hub.file_download.LocalEntryNotFoundError(
+                "Connection error, and we cannot find the requested files in"
+                " the disk cache. Please try again or make sure your Internet"
+                " connection is on."
+            )
         # From now on, etag and commit_hash are not None.
-        blob_path = os.path.join(storage_folder, "blobs", etag)
+        blob_path = os.path.join(target_dir, "blobs", etag)
         pointer_path = os.path.join(
-            storage_folder, "snapshots", commit_hash, relative_filename
+            target_dir, "snapshots", commit_hash, relative_filename
         )
         os.makedirs(os.path.dirname(blob_path), exist_ok=True)
         os.makedirs(os.path.dirname(pointer_path), exist_ok=True)
@@ -481,7 +508,7 @@ def aria2_hook(
         # then revision has to be a branch name or tag name.
         # In that case store a ref.
         huggingface_hub.file_download._cache_commit_hash_for_specific_revision(
-            storage_folder, _revision, commit_hash
+            target_dir, revision, commit_hash
         )
         if os.path.exists(pointer_path) and not force_download:
             return pointer_path
@@ -502,9 +529,7 @@ def aria2_hook(
 
     filenames = blob_paths
     headers = [
-        requests.head(
-            u, headers=headers, allow_redirects=True, proxies=proxies, timeout=10
-        ).headers
+        requests.head(u, headers=headers, allow_redirects=True, timeout=10).headers
         for u in urls
     ]
 
@@ -665,3 +690,20 @@ def _download_with_aria2(
     code = p.wait()
     if not done and code:
         raise OSError(f"aria2 exited with exit code {code}")
+
+
+def aria2_snapshot(repo_id: str, revision: str, target_dir: str):
+    # TODO: Token and authed download
+    revision = revision or huggingface_hub.constants.DEFAULT_REVISION
+
+    api = HfApi()
+    repo_info = api.repo_info(repo_id=repo_id, revision=revision)
+    assert (
+        repo_info.sha is not None
+    ), "Repo info returned from server must have a revision sha."
+
+    filenames = [f.rfilename for f in repo_info.siblings]
+    print(filenames)
+    aria2_download_hf_filenames(
+        repo_id, filenames, target_dir=target_dir, revision=revision
+    )

@@ -647,6 +647,8 @@ utils.socketio = socketio
 
 # Weird import position to steal koboldai_vars from utils
 from modeling.patches import patch_transformers
+from modeling.downloader import patch_hf_hub_downloader
+patch_hf_hub_downloader()
 
 #Load all of the model importers
 import importlib

@@ -1,0 +1,64 @@
+name: koboldai
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - colorama
+  - flask=2.3.3
+  - flask-socketio=5.3.2
+  - flask-session=0.5.0
+  - python-socketio=5.7.2
+  - python=3.10.*
+  - eventlet=0.33.3
+  - dnspython=2.2.1
+  - markdown
+  - bleach=4.1.0
+  - pip
+  - git=2.35.1
+  - protobuf
+  - marshmallow>=3.13
+  - apispec-webframeworks
+  - loguru
+  - termcolor
+  - Pillow
+  - psutil
+  - ffmpeg
+  - pip:
+    - https://github.com/Nuullll/intel-extension-for-pytorch/releases/download/v2.1.10%2Bxpu/torch-2.1.0a0+cxx11.abi-cp310-cp310-win_amd64.whl; sys_platform == 'win32'
+    - https://github.com/Nuullll/intel-extension-for-pytorch/releases/download/v2.1.10%2Bxpu/intel_extension_for_pytorch-2.1.10+xpu-cp310-cp310-win_amd64.whl; sys_platform == 'win32'
+    - --extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/
+    - torch==2.1.0a0; sys_platform == 'linux'
+    - intel-extension-for-pytorch==2.1.10+xpu; sys_platform == 'linux'
+    - bigdl-llm==2.5.0b20231218
+    - bigdl-core-xe-21==2.5.0b20231218
+    - py-cpuinfo
+    - openvino
+    - onnxruntime-openvino
+    - flask-cloudflared==0.0.10
+    - flask-ngrok
+    - flask-cors
+    - Werkzeug==2.3.7
+    - lupa==1.12
+    - transformers[sentencepiece]==4.33.3
+    - huggingface_hub==0.19.4
+    - optimum[onnxruntime]==1.16.1
+    - safetensors==0.4.1
+    - accelerate==0.25.0
+    - git+https://github.com/VE-FORBRYDERNE/mkultra
+    - flask-session
+    - ansi2html
+    - flask_compress
+    - ijson
+    - ftfy
+    - pydub
+    - diffusers
+    - git+https://github.com/0cc4m/hf_bleeding_edge/
+    - https://huggingface.github.io/autogptq-index/whl/cu118/auto-gptq/auto_gptq-0.5.1%2Bcu118-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl; sys_platform == 'linux'
+    - https://huggingface.github.io/autogptq-index/whl/cu118/auto-gptq/auto_gptq-0.5.1%2Bcu118-cp310-cp310-win_amd64.whl; sys_platform == 'win32'
+    - einops
+    - peft==0.7.1
+    - scipy
+    - windows-curses; sys_platform == 'win32'
+    - pynvml
+    - omegaconf

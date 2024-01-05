@@ -1,6 +1,10 @@
 import os, sys
 from typing import Optional
-from transformers import AutoConfig
+try:
+    from hf_bleeding_edge import AutoConfig
+except ImportError:
+    from transformers import AutoConfig
+
 import warnings
 import utils
 import json
@@ -15,8 +19,13 @@ class HFInferenceModel(InferenceModel):
     def __init__(self) -> None:
         super().__init__()
         self.model_config = None
-        #self.model_name = model_name
 
+        # TODO: model_name should probably be an instantiation parameter all the
+        # way down the inheritance chain.
+        self.model_name = None
+
+        self.path = None
+        self.hf_torch = False
         self.model = None
         self.tokenizer = None
         self.badwordsids = koboldai_settings.badwordsids_default
@@ -38,7 +47,7 @@ class HFInferenceModel(InferenceModel):
         requested_parameters = []
         if not self.hf_torch:
             return []
-        if model_name == 'customhuggingface':
+        if model_name in ('customhuggingface', 'customgptq'):
             requested_parameters.append({
                                         "uitype": "text",
                                         "unit": "text",
@@ -52,7 +61,7 @@ class HFInferenceModel(InferenceModel):
                                         "extra_classes": ""
                                     })
         
-        if model_name != 'customhuggingface' or "custom_model_name" in parameters:
+        if model_name not in ('customhuggingface', 'customgptq') or "custom_model_name" in parameters:
             model_name = parameters["custom_model_name"] if "custom_model_name" in parameters and parameters["custom_model_name"] != "" else model_name
             if model_path is not None and os.path.exists(model_path):
                 self.model_config = AutoConfig.from_pretrained(model_path)
@@ -157,7 +166,6 @@ class HFInferenceModel(InferenceModel):
         
     def set_input_parameters(self, parameters):
         if self.hf_torch and hasattr(self, "get_model_type") and self.get_model_type() != "gpt2":
-            import breakmodel
             layer_count = self.model_config["n_layer"] if isinstance(self.model_config, dict) else self.model_config.num_layers if hasattr(self.model_config, "num_layers") else self.model_config.n_layer if hasattr(self.model_config, "n_layer") else self.model_config.num_hidden_layers if hasattr(self.model_config, 'num_hidden_layers') else None
             if layer_count is not None and layer_count >= 0 and not self.nobreakmodel:
                 gpu_count = torch.cuda.device_count()
@@ -176,9 +184,8 @@ class HFInferenceModel(InferenceModel):
                 self.disk_layers = parameters['Disk_Layers'] if 'Disk_Layers' in parameters else 0    
                 if isinstance(self.disk_layers, str):
                     self.disk_layers = int(self.disk_layers) if self.disk_layers.isnumeric() else 0
-                breakmodel.gpu_blocks = layers
-                breakmodel.disk_blocks = self.disk_layers
-                self.usegpu = self.cpu_layers == 0 and breakmodel.disk_blocks == 0 and sum(self.layers)-self.layers[0] == 0
+                print("TODO: Allow config")
+                # self.usegpu = self.cpu_layers == 0 and breakmodel.disk_blocks == 0 and sum(self.layers)-self.layers[0] == 0
             self.model_type = self.get_model_type()
             self.breakmodel = ((self.model_type != 'gpt2') or self.model_type in ("gpt_neo", "gptj", "xglm", "opt")) and not self.nobreakmodel
             self.lazy_load = True
@@ -214,15 +221,21 @@ class HFInferenceModel(InferenceModel):
                 torch.cuda.empty_cache()
         except:
             pass
+    
+    def _pre_load(self) -> None:
+        # HACK: Make model instantiation work without UI parameters
+        self.model_name = self.model_name or utils.koboldai_vars.model
+        return super()._pre_load()
 
     def _post_load(self) -> None:
         self.badwordsids = koboldai_settings.badwordsids_default
         self.model_type = str(self.model_config.model_type)
+        
         # These are model specific tokenizer overrides if a model has bad defaults
-        if self.model_type == "llama":
+        if self.model_type == "llama" or self.model_type == "mistral":
             # Note: self.tokenizer is a GenericTokenizer, and self.tokenizer.tokenizer is the actual LlamaTokenizer
             self.tokenizer.add_bos_token = False
-
+            self.tokenizer.legacy = False
             # HF transformers no longer supports decode_with_prefix_space
             # We work around this by wrapping decode, encode, and __call__
             # with versions that work around the 'prefix space' misfeature
@@ -327,6 +340,11 @@ class HFInferenceModel(InferenceModel):
                 if any(c in str(k) for c in "[]")
             ]
 
+            try:
+                self.badwordsids.remove([self.tokenizer.pad_token_id])
+            except:
+                pass
+            
             if utils.koboldai_vars.newlinemode == "n":
                 self.badwordsids.append([self.tokenizer.eos_token_id])
 
@@ -379,7 +397,17 @@ class HFInferenceModel(InferenceModel):
                 revision=utils.koboldai_vars.revision,
                 cache_dir="cache",
             )
+
             self.model_type = self.model_config.model_type
+
+            if "gptq_bits" in dir(self.model_config):
+                self.gptq_model = True
+                self.gptq_bits = self.model_config.gptq_bits
+                self.gptq_groupsize = self.model_config.gptq_groupsize if getattr(self.model_config, "gptq_groupsize", False) else -1
+                self.gptq_version = self.model_config.gptq_version if getattr(self.model_config, "gptq_version", False) else 1
+                self.gptq_file = None
+            else:
+                self.gptq_model = False
         except ValueError:
             self.model_type = {
                 "NeoCustom": "gpt_neo",

@@ -23,7 +23,13 @@ socket.on('error_popup', function(data){error_popup(data);});
 socket.on("world_info_entry", function(data){process_world_info_entry(data);});
 socket.on("world_info_entry_used_in_game", function(data){world_info_entry_used_in_game(data);});
 socket.on("world_info_folder", function(data){world_info_folder(data);});
-socket.on("delete_new_world_info_entry", function(data){document.getElementById("world_info_-1").remove();});
+socket.on("delete_new_world_info_entry", function(data) {
+	const card = $el("#world_info_-1");
+	// Prevent weird race condition/strange event call order where blur event
+	// fires before removal is finished on Chrome
+	card.removing = true
+	card.remove();
+});
 socket.on("delete_world_info_entry", function(data){document.getElementById("world_info_"+data).remove();});
 socket.on("delete_world_info_folder", function(data){document.getElementById("world_info_folder_"+data).remove();});
 socket.on("error", function(data){show_error_message(data);});
@@ -37,6 +43,9 @@ socket.on("debug_message", function(data){console.log(data);});
 socket.on("scratchpad_response", recieveScratchpadResponse);
 socket.on("show_error_notification", function(data) { reportError(data.title, data.text) });
 socket.on("generated_wi", showGeneratedWIData);
+socket.on("stream_tokens", stream_tokens);
+socket.on("show_options", show_options);
+socket.on("set_audio_status", set_audio_status);
 //socket.onAny(function(event_name, data) {console.log({"event": event_name, "class": data.classname, "data": data});});
 
 // Must be done before any elements are made; we track their changes.
@@ -57,7 +66,6 @@ var rename_return_emit_name = "popup_rename";
 var popup_rows = [];
 var popup_style = "";
 var popup_sort = {};
-var shift_down = false;
 var world_info_data = {};
 var world_info_folder_data = {};
 var saved_settings = {};
@@ -83,6 +91,21 @@ let story_id = -1;
 var dirty_chunks = [];
 var initial_socketio_connection_occured = false;
 var selected_model_data;
+var supported_gen_modes = [];
+var privacy_mode_enabled = false;
+var attention_wanting_wi_bar = null;
+var ai_busy = false;
+var can_show_options = true;
+
+var streaming = {
+	windowOpen: false,
+	buffer: "",
+	time: {
+		msBuffer: [10],
+		preTime: null,
+	},
+	typeyTimeout: null,
+};
 
 // Each entry into this array should be an object that looks like:
 // {class: "class", key: "key", func: callback}
@@ -126,6 +149,7 @@ const context_menu_actions = {
 		{label: "Add to World Info Entry", icon: "auto_stories", enabledOn: "SELECTION", click: push_selection_to_world_info},
 		{label: "Add as Bias", icon: "insights", enabledOn: "SELECTION", click: push_selection_to_phrase_bias},
 		{label: "Retry from here", icon: "refresh", enabledOn: "CARET", click: retry_from_here},
+		{label: "Generate image for here", icon: "image", enabledOn: "CARET", click: generate_image},
 		null,
 		{label: "Take Screenshot", icon: "screenshot_monitor", enabledOn: "SELECTION", click: screenshot_selection},
 		// Not implemented! See view_selection_probabiltiies
@@ -147,7 +171,36 @@ const context_menu_actions = {
 	"wi-img-upload-button": [
 		{label: "Upload Image", icon: "file_upload", enabledOn: "ALWAYS", click: wiImageReplace},
 		{label: "Use Generated Image", icon: "image", enabledOn: "GENERATED-IMAGE", click: wiImageUseGeneratedImage},
-	]
+	],
+	"submit-button": [
+		{label: "Generate", icon: "edit", enabledOn: "ALWAYS", click: () => storySubmit()},
+		null,
+		{
+			label: "Generate Forever",
+			icon: "edit_off",
+			enabledOn: () => supported_gen_modes.includes("forever"),
+			click: () => storySubmit("forever")
+		},
+		{
+			label: "Generate Until EOS",
+			icon: "edit_off",
+			enabledOn: () => supported_gen_modes.includes("until_eos"),
+			click: () => storySubmit("until_eos")
+		},
+		null,
+		{
+			label: "Finish Line",
+			icon: "edit_off",
+			enabledOn: () => supported_gen_modes.includes("until_newline"),
+			click: () => storySubmit("until_newline")
+		},
+		{
+			label: "Finish Sentence",
+			icon: "edit_off",
+			enabledOn: () => supported_gen_modes.includes("until_sentence_end"),
+			click: () => storySubmit("until_sentence_end")
+		},
+	],
 };
 
 let context_menu_cache = [];
@@ -161,7 +214,7 @@ const shortcuts = [
 	{mod: "ctrl", key: "m", desc: "Focuses Memory", func: () => focusEl("#memory")},
 	{mod: "ctrl", key: "u", desc: "Focuses Author's Note", func: () => focusEl("#authors_notes")}, // CTRL-N is reserved :^(
 	{mod: "ctrl", key: "g", desc: "Focuses game text", func: () => focusEl("#input_text")},
-	{mod: "ctrl", key: "l", desc: '"Lock" screen (Not secure)', func: () => socket.emit("privacy_mode", {'enabled': true})},
+	{mod: "ctrl", key: "l", desc: '"Lock" screen (Not secure)', func: maybe_enable_privacy_mode},
 	{mod: "ctrl", key: "k", desc: "Finder", func: open_finder},
 	{mod: "ctrl", key: "/", desc: "Help screen", func: () => openPopup("shortcuts-popup")},
 ]
@@ -239,10 +292,17 @@ function disconnect() {
 	document.getElementById("disconnect_message").classList.remove("hidden");
 }
 
-function storySubmit() {
+function storySubmit(genMode=null) {
+	const textInput = document.getElementById("input_text");
+	const themeInput = document.getElementById("themetext");
 	disruptStoryState();
-	socket.emit('submit', {'data': document.getElementById('input_text').value, 'theme': document.getElementById('themetext').value});
-	document.getElementById('input_text').value = '';
+	socket.emit('submit', {
+		data: textInput.value,
+		theme: themeInput.value,
+		gen_mode: genMode,
+	});
+
+	textInput.value = '';
 	document.getElementById('themetext').value = '';
 }
 
@@ -296,7 +356,7 @@ function reset_story() {
 	}
 	
 	//clear any options
-	var option_area = document.getElementById("Select Options");
+	var option_area = document.getElementById("option-container");
 	while (option_area.firstChild) {
 		option_area.removeChild(option_area.firstChild);
 	}
@@ -328,7 +388,7 @@ function reset_story() {
 		document.getElementById("Selected Text").setAttribute("contenteditable", "true");
 		
 	}
-	document.getElementById('main-grid').setAttribute('option_length', 0);
+	document.getElementById('main-grid').setAttribute("hide-options", true);
 
 	$(".chat-message").remove();
 	addInitChatMessage();
@@ -348,22 +408,143 @@ function fix_text(val) {
 	}
 }
 
+function create_option_element(text, optionId, actionId, type, itemPinned=false) {
+	// Type must be "gen" or "history"
+	const optionContainer = $el("#option-container");
+	const row = $e("div", optionContainer, {
+		classes: ["sequence_row"],
+		"option_id": optionId,
+		"action_id": actionId,
+	});
+
+	const textcell = document.createElement("span");
+	textcell.textContent = text;
+	textcell.classList.add("sequence");
+	textcell.setAttribute("option_id", optionId);
+	textcell.setAttribute("option_chunk", actionId);
+
+	const iconcell = document.createElement("span");
+	iconcell.setAttribute("option_id", optionId);
+	iconcell.setAttribute("option_chunk", actionId);
+	iconcell.classList.add("sequnce_icon");
+
+	const icon = document.createElement("span");
+	icon.id = "Pin_"+optionId;
+	icon.classList.add("material-icons-outlined");
+	icon.classList.add("option_icon");
+	icon.classList.add("cursor");
+
+	if (type === "gen") {
+		icon.classList.add("pin");
+		icon.textContent = "push_pin";
+
+		if (itemPinned) {
+			icon.classList.add('rotate_45');
+		} else {
+			icon.setAttribute('style', "filter: brightness(50%);");
+		}
+
+		iconcell.addEventListener("click", function() {
+			socket.emit("Pinning", {
+				chunk: actionId,
+				option: optionId
+			});
+		});
+	} else if (type === "history") {
+		icon.textContent = "cached";
+
+		const delete_icon = $e("span", iconcell, {
+			classes: ["material-icons-outlined", "cursor", 'option_icon'],
+			tooltip: "Delete Option",
+			option_id: optionId,
+			option_chunk: actionId,
+			textContent: 'delete'
+		});
+
+		delete_icon.addEventListener("click", function() {
+			socket.emit("delete_option", {
+				chunk: actionId,
+				option: optionId
+			});
+		});
+	}
+
+
+	iconcell.append(icon);
+
+	textcell.addEventListener("click", function() {
+		socket.emit("Use Option Text", {
+			chunk: actionId,
+			option: optionId,
+		});
+	});
+
+	row.append(textcell);
+	row.append(iconcell);
+	optionContainer.append(row);
+	return row;
+}
+
+function action_count_changed() {
+	// Delete all options before the next chunk to hidden
+	const option_container = document.getElementById("option-container");
+	const current_chunk = parseInt(document.getElementById("action_count").textContent) + 1;
+
+	for (const chunk of Array.from(option_container.children)) {
+		if (parseInt(chunk.getAttribute("action_id")) === current_chunk) {
+			// good
+		} else {
+			chunk.remove();
+		}
+	}
+}
+
+function visible_options_present() {
+	const optionContainer = $el("#option-container");
+	for (const el of optionContainer.childNodes) {
+		if (el.classList.contains("hidden")) continue;
+		return true;
+	}
+	return false;
+}
+
+function show_options(doShow) {
+	can_show_options = doShow;
+	let show = doShow;// && visible_options_present();
+	$el("#option-container").classList.toggle("hidden", !show);
+	$el("#main-grid").setAttribute("hide-options", !show);
+
+	if (show) {
+		const action = actions_data[current_action + 1];
+		if (!action) return;
+
+		create_options({
+			id: current_action+1,
+			action: action
+		});
+	}
+}
+
 function create_options(action) {
 	//Set all options before the next chunk to hidden
-	if (action.id  != current_action+1) {
+	if (action.id != current_action+1) {
 		return;
 	}
-	var option_chunk = document.getElementById("Select Options");
-	
-	//first, let's clear out our existing data
-	while (option_chunk.firstChild) {
-		option_chunk.removeChild(option_chunk.firstChild);
+
+	if (!can_show_options) {
+		return;
 	}
-	
+
+	// First, let's clear out our existing data. Note: use querySelectorAll to
+	// iterate for deletion because other methods resize the list during iteration
+	for (const option of document.querySelectorAll(".sequence_row")) {
+		option.remove();
+	}
+
 	//Let's check if we only have a single redo option. In that case we din't show as the user can use the redo button
-	seen_prev_selection = false;
-	show_options = false;
-	for (item of action.action.Options) {
+	let seen_prev_selection = false;
+	let show_options = false;
+	for (const item of action.action.Options) {
 		if (!(item['Previous Selection']) && !(item['Edited'])) {
 			show_options = true;
 			break;
@@ -376,100 +557,46 @@ function create_options(action) {
 			}
 		}
 	}
-	if (!(show_options)) {
-		document.getElementById('main-grid').setAttribute('option_length', 0);
+
+	const mainGrid = $el("#main-grid");
+	const optionContainer = $el("#option-container");
+
+	if (!show_options) {
+		mainGrid.setAttribute("hide-options", true);
+		optionContainer.classList.add("hidden");
 		return;
 	}
-	
-	document.getElementById('main-grid').setAttribute('option_length', action.action.Options.length);
-	
-	var table = document.createElement("div");
-	table.classList.add("sequences");
-	//Add Redo options
-	let added_options=0;
-	i=0;
-	for (item of action.action.Options) {
-		if ((item['Previous Selection']) && (item.text != "")) {
-			var row = document.createElement("div");
-			row.classList.add("sequence_row");
-			var textcell = document.createElement("span");
-			textcell.textContent = item.text;
-			textcell.classList.add("sequence");
-			textcell.setAttribute("option_id", i);
-			textcell.setAttribute("option_chunk", action.id);
-			var iconcell = document.createElement("span");
-			iconcell.setAttribute("option_id", i);
-			iconcell.setAttribute("option_chunk", action.id);
-			iconcell.classList.add("sequnce_icon");
-			var icon = document.createElement("span");
-			icon.id = "Pin_"+i;
-			icon.classList.add("material-icons-outlined");
-			icon.classList.add("option_icon");
-			icon.classList.add("cursor");
-			icon.textContent = "cached";
-			iconcell.append(icon);
-			delete_icon = $e("span", iconcell, {"classes": ["material-icons-outlined", "cursor", 'option_icon'], 
-												"tooltip": "Delete Option", 'option_id': i,
-												'option_chunk': action.id, 'textContent': 'delete'});
-			delete_icon.onclick = function () {
-									socket.emit("delete_option", {"chunk": this.getAttribute("option_chunk"), "option": this.getAttribute("option_id")});
-							  };
-			textcell.onclick = function () {
-									socket.emit("Use Option Text", {"chunk": this.getAttribute("option_chunk"), "option": this.getAttribute("option_id")});
-							  };
-			row.append(textcell);
-			row.append(iconcell);
-			table.append(row);
-			added_options+=1;
-		}
-		i+=1;
+
+	// mainGrid.setAttribute("hide-options", false);
+	// optionContainer.classList.toggle("hidden", action.action.Options.length < 1);
+
+	// Gens
+	let optionId = 0;
+	for (const item of action.action.Options) {
+		if (!item.text) continue;
+		if (item.Edited) continue;
+		if (item["Previous Selection"]) continue;
+
+		create_option_element(item.text, optionId, action.id, "gen", item.Pinned);
+		optionId++;
 	}
-	//Add general options
-	i=0;
-	for (item of action.action.Options) {
-		if (!(item.Edited) && !(item['Previous Selection']) && (item.text != "")) {
-			var row = document.createElement("div");
-			row.classList.add("sequence_row");
-			var textcell = document.createElement("span");
-			textcell.textContent = item.text;
-			textcell.classList.add("sequence");
-			textcell.setAttribute("option_id", i);
-			textcell.setAttribute("option_chunk", action.id);
-			var iconcell = document.createElement("span");
-			iconcell.setAttribute("option_id", i);
-			iconcell.setAttribute("option_chunk", action.id);
-			iconcell.classList.add("sequnce_icon");
-			var icon = document.createElement("span");
-			icon.id = "Pin_"+i;
-			icon.classList.add("material-icons-outlined");
-			icon.classList.add("option_icon");
-			icon.classList.add("cursor");
-			icon.classList.add("pin");
-			icon.textContent = "push_pin";
-			if (!(item.Pinned)) {
-				icon.setAttribute('style', "filter: brightness(50%);");
-			} else {
-				icon.classList.add('rotate_45');
-			}
-			iconcell.append(icon);
-			iconcell.onclick = function () {
-									socket.emit("Pinning", {"chunk": this.getAttribute("option_chunk"), "option": this.getAttribute("option_id")});
-							   };
-			textcell.onclick = function () {
-									socket.emit("Use Option Text", {"chunk": this.getAttribute("option_chunk"), "option": this.getAttribute("option_id")});
-							  };
-			row.append(textcell);
-			row.append(iconcell);
-			table.append(row);
-			added_options+=1;
-		}
-		i+=1;
+
+
+	// History
+	optionId = 0;
+	for (const item of action.action.Options) {
+		if (!item.text) continue;
+		if (!item["Previous Selection"]) continue;
+
+		create_option_element(item.text, optionId, action.id, "history");
+		optionId++;
 	}
-	if (added_options > 0) {
-		option_chunk.append(table);
-	}
-	
-	
+
+	let anyOptions = visible_options_present();
+
+	$el("#option-container").classList.toggle("hidden", !anyOptions);
+	$el("#main-grid").setAttribute("hide-options", !anyOptions);
+
 	//make sure our last updated chunk is in view
 	//option_chunk.scrollIntoView();
 }
@@ -507,20 +634,41 @@ function process_actions_data(data) {
 		//update
 		action_type = "update";
 	}
-	for (action of actions) {
+
+	for (const action of actions) {
 		actions_data[parseInt(action.id)] = action.action;
 		do_story_text_updates(action);
 		create_options(action);
+		set_audio_status(action);
 	}
 	
 	clearTimeout(game_text_scroll_timeout);
 	game_text_scroll_timeout = setTimeout(run_infinite_scroll_update.bind(null, action_type, actions, first_action), 200);
 	clearTimeout(auto_loader_timeout);
 	
-	
 	hide_show_prompt();
 	//console.log("Took "+((Date.now()-start_time)/1000)+"s to process");
 	
+}
+
+function set_audio_status(action) {
+	if (!('audio_gen' in action.action)) {
+		action.action.audio_gen = 0;
+	}
+	if (!(document.getElementById("audio_gen_status_"+action.id))) {
+		sp = document.createElement("SPAN");
+		sp.id = "audio_gen_status_"+action.id
+		sp.classList.add("audio_status_action");
+		sp.setAttribute("status", -1);
+		document.getElementById("audio_status").appendChild(sp);
+	}
+	document.getElementById("audio_gen_status_"+action.id).setAttribute("status", action.action.audio_gen);
+	
+	//Delete empty actions
+	if (action.action['Selected Text'] == "") {
+		console.log("disabling status");
+		document.getElementById("audio_gen_status_"+action.id).setAttribute("status", -1);
+	}
 }
 
 function parseChatMessages(text) {
@@ -578,9 +726,9 @@ function do_story_text_updates(action) {
 			item.classList.add("rawtext");
 			item.setAttribute("chunk", action.id);
 			item.setAttribute("tabindex", parseInt(action.id)+1);
-			//item.addEventListener("focus", (event) => {
-			//	set_edit(event.target);
-			//});
+			item.addEventListener("focus", (event) => {
+				set_image_action(action.id);
+			});
 			
 			//need to find the closest element
 			closest_element = document.getElementById("story_prompt");
@@ -597,13 +745,11 @@ function do_story_text_updates(action) {
 				story_area.append(item);
 			}
 		}
-		
-		
-		if (action.action['Selected Text'].charAt(0) == ">") {
-			item.classList.add("action_mode_input");
-		} else {
-			item.classList.remove("action_mode_input");
-		}
+
+		item.classList.toggle(
+			"action_mode_input",
+			action.action['Selected Text'].replaceAll("\n", "")[0] === ">"
+		);
 
 		if ('wi_highlighted_text' in action.action) {
 			for (chunk of action.action['wi_highlighted_text']) {
@@ -766,6 +912,10 @@ function update_status_bar(data) {
 }
 
 function do_ai_busy(data) {
+	ai_busy = data.value;
+	// Don't allow editing while Mr. Kobold is thinking
+	document.getElementById("Selected Text").contentEditable = !ai_busy;
+
 	if (data.value) {
 		ai_busy_start = Date.now();
 		favicon.start_swap()
@@ -830,7 +980,6 @@ function var_changed(data) {
 		if (current_action <= 0) {
 			//console.log("setting action_count to "+current_action);
 			const storyPrompt = $el("#story_prompt");
-			if (storyPrompt) storyPrompt.classList.remove("hidden");
 			scroll_trigger_element = undefined;
 			document.getElementById("Selected Text").onscroll = undefined;
 		}
@@ -925,6 +1074,9 @@ function var_changed(data) {
 	//special case for welcome text since we want to allow HTML
 	} else if (data.classname == 'model' && data.name == 'welcome') {
 		document.getElementById('welcome_text').innerHTML = data.value;
+	//Special case for permitted generation modes
+	} else if (data.classname == 'model' && data.name == 'supported_gen_modes') {
+		supported_gen_modes = data.value;
 	//Basic Data Syncing
 	} else {
 		var elements_to_change = document.getElementsByClassName("var_sync_"+data.classname.replace(" ", "_")+"_"+data.name.replace(" ", "_"));
@@ -1015,20 +1167,8 @@ function var_changed(data) {
 	//	Change_Theme(getCookie("theme", "Monochrome"));
 	//}
 	
-	//Set all options before the next chunk to hidden
 	if ((data.classname == "actions") && (data.name == "Action Count")) {
-		var option_container = document.getElementById("Select Options");
-		var current_chunk = parseInt(document.getElementById("action_count").textContent)+1;
-		
-		var children = option_container.children;
-		for (var i = 0; i < children.length; i++) {
-			var chunk = children[i];
-			if (chunk.id == "Select Options Chunk " + current_chunk) {
-				chunk.classList.remove("hidden");
-			} else {
-				chunk.classList.add("hidden");
-			}
-		}
+		action_count_changed();
 	}
 	
 	
@@ -1169,7 +1309,7 @@ function redrawPopup() {
 			delete_icon.setAttribute("tooltip", "Delete");
 			delete_icon.id = row.path;
 			delete_icon.setAttribute("folder", row.isFolder);
-			delete_icon.onclick = function () {
+			delete_icon.addEventListener("click", function(event) {
 				const message = this.getAttribute("folder") == "true" ?  "Do you really want to delete this folder and ALL files under it?" : "Do you really want to delete this file?";
 				const delId = this.id;
 
@@ -1179,9 +1319,11 @@ function redrawPopup() {
 					denyText="I've changed my mind!",
 					confirmCallback=function() {
 						socket.emit("popup_delete", delId);
-					}
+					},
+					null,
+					event.shiftKey
 				);
-			};
+			});
 		}
 		icon_area.append(delete_icon);
 		tr.append(icon_area);
@@ -1253,6 +1395,29 @@ function redrawPopup() {
 					accept.classList.remove("disabled");
 					accept.disabled = false;
 					accept.setAttribute("selected_value", this.id);
+				} else {
+					accept.setAttribute("selected_value", "");
+					accept.classList.add("disabled");
+					accept.disabled = true;
+					if (this.getAttribute("folder") == "true") {
+						socket.emit("popup_change_folder", this.id);
+					}
+				}
+
+				let popup_list = document.getElementById('popup_list').getElementsByClassName("selected");
+				for (item of popup_list) {
+					item.classList.remove("selected");
+				}
+				this.parentElement.classList.add("selected");
+			};
+			td.ondblclick = function () {
+				let accept = document.getElementById("popup_accept");
+				if (this.getAttribute("valid") == "true") {
+					accept.classList.remove("disabled");
+					accept.disabled = false;
+					accept.setAttribute("selected_value", this.id);
+					socket.emit(document.getElementById("popup_accept").getAttribute("emit"), this.id);
+					closePopups();
 				} else {
 					accept.setAttribute("selected_value", "");
 					accept.classList.add("disabled");
@@ -1651,6 +1816,12 @@ function show_model_menu(data) {
 	
 }
 
+function getOptions(id){
+  let selectElement = document.getElementById(id);
+  let optionNames = [...selectElement.options].map(o => o.text);
+  return optionNames;
+}
+
 function model_settings_checker() {
 	//get check value:
 	missing_element = false;
@@ -1681,30 +1852,6 @@ function model_settings_checker() {
 			valid = (check_value < this.check_data['value']);
 		}
 		if (valid || missing_element) {
-			//if we are supposed to refresh when this value changes we'll resubmit
-			if ((this.getAttribute("refresh_model_inputs") == "true") && !missing_element && !this.noresubmit) {
-				//get an object of all the input settings from the user
-				data = {}
-				settings_area = document.getElementById(document.getElementById("modelplugin").value + "_settings_area");
-				if (settings_area) {
-					for (const element of settings_area.querySelectorAll(".model_settings_input:not(.hidden)")) {
-						var element_data = element.value;
-						if (element.getAttribute("data_type") == "int") {
-							element_data = parseInt(element_data);
-						} else if (element.getAttribute("data_type") == "float") {
-							element_data = parseFloat(element_data);
-						} else if (element.getAttribute("data_type") == "bool") {
-							element_data = (element_data == 'on');
-						}
-						data[element.id.split("|")[1].replace("_value", "")] = element_data;
-					}
-				}
-				data = {...data, ...selected_model_data};
-				
-				data['plugin'] = document.getElementById("modelplugin").value;
-				
-				socket.emit("resubmit_model_info", data);
-			}
 			if ('sum' in this.check_data) {
 				for (const temp of this.check_data['sum']) {
 					if (document.getElementById(this.id.split("|")[0] +"|"  + temp + "_value")) {
@@ -1773,9 +1920,41 @@ function model_settings_checker() {
 		
 		
 	}
+	
+	//if we are supposed to refresh when this value changes we'll resubmit
+	if ((this != window) && (this.getAttribute("refresh_model_inputs") == "true") && !missing_element && !this.noresubmit) {
+		//get an object of all the input settings from the user
+		data = {}
+		settings_area = document.getElementById(document.getElementById("modelplugin").value + "_settings_area");
+		if (settings_area) {
+			for (const element of settings_area.querySelectorAll(".model_settings_input:not(.hidden)")) {
+				var element_data = element.value;
+				if (element.getAttribute("data_type") == "int") {
+					element_data = parseInt(element_data);
+				} else if (element.getAttribute("data_type") == "float") {
+					element_data = parseFloat(element_data);
+				} else if (element.getAttribute("data_type") == "bool") {
+					element_data = element.checked;
+				}
+				data[element.id.split("|")[1].replace("_value", "")] = element_data;
+			}
+		}
+		data = {...data, ...selected_model_data};
+		
+		data['plugin'] = document.getElementById("modelplugin").value;
+		data['valid_backends'] = getOptions("modelplugin");
+		
+		socket.emit("resubmit_model_info", data);
+	}
 }
 
+function set_toggle(id) {
+	$('#'+id).bootstrapToggle({size: "mini", onstyle: "success", toggle: "toggle"});
+}
+
+var temp;
 function selected_model_info(sent_data) {
+	temp = sent_data;
 	const data = sent_data['model_backends'];
 	//clear out the loadmodelsettings
 	var loadmodelsettings = document.getElementById('loadmodelsettings')
@@ -1869,9 +2048,7 @@ function selected_model_info(sent_data) {
 					toggle.check_data = null;
 				}
 				new_setting.querySelector('#blank_model_settings_toggle').append(toggle);
-				setTimeout(function() {
-										  $('#'+loader + "\\|" + item['id'] + "_value").bootstrapToggle({size: "mini", onstyle: "success", toggle: "toggle"});
-										}, 200);
+				setTimeout(set_toggle, 200, loader + "\\|" + item['id'] + "_value");
 				toggle.noresubmit = true;
 				toggle.onclick();
 				toggle.noresubmit = false;
@@ -1957,6 +2134,10 @@ function selected_model_info(sent_data) {
 		}
 	}
 	
+	if ('selected_model_backend' in sent_data) {
+		document.getElementById("modelplugin").value = sent_data['selected_model_backend'];
+	}
+	
 	//unhide the first plugin settings
 	if (document.getElementById(document.getElementById("modelplugin").value + "_settings_area")) {
 		document.getElementById(document.getElementById("modelplugin").value + "_settings_area").classList.remove("hidden");
@@ -1996,7 +2177,7 @@ function load_model() {
 	data = {}
 	if (settings_area) {
 		for (const element of settings_area.querySelectorAll(".model_settings_input:not(.hidden)")) {
-			var element_data = element.value;
+			var element_data = element.getAttribute("data_type") === "bool" ? element.checked : element.value;
 			if ((element.tagName == "SELECT") && (element.multiple)) {
 				element_data = [];
 				for (var i=0, iLen=element.options.length; i<iLen; i++) {
@@ -2009,8 +2190,6 @@ function load_model() {
 					element_data = parseInt(element_data);
 				} else if (element.getAttribute("data_type") == "float") {
 					element_data = parseFloat(element_data);
-				} else if (element.getAttribute("data_type") == "bool") {
-					element_data = (element_data == 'on');
 				}
 			}
 			data[element.id.split("|")[1].replace("_value", "")] = element_data;
@@ -2078,6 +2257,7 @@ function world_info_entry(data) {
 	} else {
 		world_info_card.classList.remove("used_in_game");
 	}
+
 	const title = world_info_card.querySelector('.world_info_title');
 	title.id = "world_info_title_"+data.uid;
 	title.textContent = data.title;
@@ -2085,7 +2265,7 @@ function world_info_entry(data) {
 	title.setAttribute("original_text", data.title);
 	title.setAttribute("contenteditable", true);
 	title.classList.remove("pulse");
-	title.ondragstart=function() {event.preventDefault();event.stopPropagation();};
+	title.ondragstart=function(event) {event.preventDefault();event.stopPropagation();};
 	title.onblur = function () {
 				this.parentElement.parentElement.setAttribute('draggable', 'true');
 				this.setAttribute('draggable', 'true');
@@ -2095,20 +2275,31 @@ function world_info_entry(data) {
 					this.classList.add("pulse");
 				}
 			}
-	world_info_card.addEventListener('dragstart', dragStart);
-	world_info_card.addEventListener('dragend', dragend);
+
+	title.addEventListener("keydown", function(event) {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			this.blur();
+		}
+	});
+
 	title.addEventListener('dragenter', dragEnter)
 	title.addEventListener('dragover', dragOver);
 	title.addEventListener('dragleave', dragLeave);
 	title.addEventListener('drop', drop);
-	delete_icon = world_info_card.querySelector('.world_info_delete');
+
+	world_info_card.addEventListener('dragstart', dragStart);
+	world_info_card.addEventListener('dragend', dragend);
+
+	const delete_icon = world_info_card.querySelector('.world_info_delete');
 	delete_icon.id = "world_info_delete_"+data.uid;
 	delete_icon.setAttribute("uid", data.uid);
 	delete_icon.setAttribute("wi-title", data.title);
-	delete_icon.onclick = function () {
+	delete_icon.addEventListener("click", function (event) {
 		const wiTitle = this.getAttribute("wi-title");
 		const wiUid = parseInt(this.getAttribute("uid"));
 		const wiElement = this.parentElement.parentElement;
+
 		deleteConfirmation([
 				{text: "You're about to delete World Info entry "},
 				{text: wiTitle, format: "bold"},
@@ -2122,9 +2313,11 @@ function world_info_entry(data) {
 				} else {
 					socket.emit("delete_world_info", wiUid);
 				}
-			}
+			},
+			null,
+			event.shiftKey
 		);
-	}
+	});
 
 	const wiImgContainer = world_info_card.querySelector(".world_info_image_container");
 	const wiImg = wiImgContainer.querySelector(".world_info_image");
@@ -2217,15 +2410,16 @@ function world_info_entry(data) {
 		this.classList.add("pulse");
 	})
 
-	tags = world_info_card.querySelector('.world_info_tag_primary_area');
+	const tags = world_info_card.querySelector('.world_info_tag_primary_area');
 	tags.id = "world_info_tags_"+data.uid;
 	//add tag content here
-	add_tags(tags, data);
+	add_tags(tags, data, "primary");
 	
-	secondarytags = world_info_card.querySelector('.world_info_tag_secondary_area');
+	const secondarytags = world_info_card.querySelector('.world_info_tag_secondary_area');
 	secondarytags.id = "world_info_secondtags_"+data.uid;
 	//add second tag content here
-	add_secondary_tags(secondarytags, data);
+	add_tags(secondarytags, data, "secondary");
+
 	//w++ toggle
 	wpp_toggle_area = world_info_card.querySelector('.world_info_wpp_toggle_area');
 	wpp_toggle_area.id = "world_info_wpp_toggle_area_"+data.uid;
@@ -2395,12 +2589,12 @@ function world_info_entry(data) {
 	comment.setAttribute("uid", data.uid);
 	comment.value = data.comment;
 	comment.onchange = function () {
-							world_info_data[this.getAttribute('uid')]['comment'] = this.textContent;
-							send_world_info(this.getAttribute('uid'));
+							world_info_data[data.uid].comment = this.value;
+							send_world_info(data.uid);
 							this.classList.add("pulse");
 						}
 	comment.classList.remove("pulse");
-						
+
 	//Let's figure out the order to insert this card
 	var found = false;
 	var moved = false;
@@ -2598,8 +2792,9 @@ function world_info_folder(data) {
 			delete_button.classList.add("cursor");
 			delete_button.setAttribute("folder", folder_name);
 			delete_button.textContent = "delete";
-			delete_button.onclick = function () {
+			delete_button.addEventListener("click", function (event) {
 				const folderName = this.getAttribute("folder");
+
 				deleteConfirmation([
 						{text: "You're about to delete World Info folder "},
 						{text: folderName, format: "bold"},
@@ -2609,9 +2804,11 @@ function world_info_folder(data) {
 					],
 					confirmText="Go for it.",
 					denyText="I've changed my mind!",
-					confirmCallback=function() { socket.emit("delete_wi_folder", folderName); }
+					confirmCallback=function() { socket.emit("delete_wi_folder", folderName); },
+					null,
+					event.shiftKey
 				);
-			};
+			});
 			delete_button.classList.add("delete");
 			title.append(delete_button);
 			
@@ -3116,6 +3313,8 @@ function upload_file_without_save(file_box) {
 }
 
 function send_world_info(uid) {
+	const cardEl = document.getElementById(`world_info_${uid}`);
+	if (cardEl.removing) return;
 	socket.emit("edit_world_info", world_info_data[uid]);
 }
 
@@ -3235,6 +3434,10 @@ function gametextwatcher(records) {
 			if (!dirty_chunks.includes("game_text")) {
 				dirty_chunks.push("game_text");
 			}
+		} else if ((record.target.nodeName == "#text") && (record.target.parentNode == game_text)) {
+			if (!dirty_chunks.includes("game_text")) {
+				dirty_chunks.push("game_text");
+			}
 		}
 	}
 }
@@ -3243,6 +3446,11 @@ function fix_dirty_game_text() {
 	//This should get fired if we have deleted chunks or have added text outside of a node.
 	//We wait until after the game text has lost focus to fix things otherwise it messes with typing
 	var game_text = document.getElementById("Selected Text");
+
+	// Fix stray stream
+	const streamBufferEl = document.getElementById("#token-stream-buffer");
+	if (streamBufferEl) streamBufferEl.remove();
+
 	//Fix missing story prompt
 	if (dirty_chunks.includes("-1")) {
 		if (!document.getElementById("story_prompt")) {
@@ -3255,9 +3463,10 @@ function fix_dirty_game_text() {
 			game_text.prepend(story_prompt);
 		}
 	}
+
 	if (dirty_chunks.includes("game_text")) {
 		dirty_chunks = dirty_chunks.filter(item => item != "game_text");
-		console.log("Firing Fix messed up text");
+		//console.log("Firing Fix messed up text");
 		//Fixing text outside of chunks
 		for (node of game_text.childNodes) {
 			if ((!(node instanceof HTMLElement) || !node.hasAttribute("chunk")) && (node.textContent.trim() != "")) {
@@ -3268,17 +3477,20 @@ function fix_dirty_game_text() {
 				} else {
 					node_text = node.data;
 				}
-				if (!(node.nextElementSibling) || !(dirty_chunks.includes(node.nextElementSibling.getAttribute("chunk"))) || dirty_chunks.includes(node.previousElementSibling.getAttribute("chunk"))) {
+								if ((!(node.nextElementSibling) || !(dirty_chunks.includes(node.nextElementSibling.getAttribute("chunk"))) || dirty_chunks.includes(node.previousElementSibling.getAttribute("chunk"))) && (node.previousElementSibling)) {
 					node.previousElementSibling.innerText = node.previousElementSibling.innerText + node_text;
 					if (!dirty_chunks.includes(node.previousElementSibling.getAttribute("chunk"))) {
 						dirty_chunks.push(node.previousElementSibling.getAttribute("chunk"));
 					}
 				} else {
 					node.nextElementSibling.innerText = node.nextElementSibling.innerText + node_text;
+					if (!dirty_chunks.includes(node.nextElementSibling.getAttribute("chunk"))) {
+						dirty_chunks.push(node.nextElementSibling.getAttribute("chunk"));
+					}
 				}
 				
 				//Looks like sometimes it splits the parent. Let's look for that and fix it too
-				if (node.nextElementSibling && (node.nextElementSibling.getAttribute("chunk") == node.previousElementSibling.getAttribute("chunk"))) {
+				if (node.nextElementSibling && node.previousElementSibling && (node.nextElementSibling.getAttribute("chunk") == node.previousElementSibling.getAttribute("chunk"))) {
 					node.previousElementSibling.innerText = node.previousElementSibling.innerText + node.nextElementSibling.innerText;
 					node.nextElementSibling.remove();
 				}
@@ -3290,7 +3502,7 @@ function fix_dirty_game_text() {
 
 function savegametextchanges() {
 	fix_dirty_game_text();
-	for (item of document.getElementsByClassName("editing")) {
+	for (const item of document.getElementsByClassName("editing")) {
 		item.classList.remove("editing");
 	}
 	if (dirty_chunks.length > 0) {
@@ -3333,7 +3545,83 @@ function update_game_text(id, new_text) {
 			socket.emit("Set Selected Text", {"id": id, "text": ""});
 		}
 	}
-	
+}
+
+function stream_tokens(tokens) {
+	// NOTE: This is only for genamt/batch size 1.
+	const smoothStreamingEnabled = $el("#user_smooth_streaming").checked;
+
+	let streamBuffer = $el("#token-stream-buffer");
+
+	if (tokens === true) {
+		streaming.windowOpen = true;
+		return;
+	}
+
+	if (!streaming.windowOpen) {
+		// Reject tokens sent after the streaming window is closed
+		return;
+	}
+
+	if (!tokens) {
+		// Server told us to close up shop!
+		streaming.windowOpen = false;
+		streaming.buffer = "";
+		clearTimeout(streaming.typeyTimeout);
+		streaming.typeyTimeout = null;
+		if (streamBuffer) streamBuffer.remove();
+		return;
+	}
+
+	if (!streamBuffer) {
+		// This should happen once at the beginning of the stream
+		streamBuffer = $e("span", $el(".gametext"), {
+			id: "token-stream-buffer",
+			classes: ["within_max_length"]
+		});
+	}
+
+	if (!smoothStreamingEnabled && streaming.typeyTimeout) {
+		streaming.buffer = "";
+		clearTimeout(streaming.typeyTimeout);
+		streaming.typeyTimeout = null;
+	}
+
+	if (!streaming.typeyTimeout && smoothStreamingEnabled) {
+		function _char() {
+			const times = streaming.time.msBuffer;
+			const avg = times.reduce((a, b) => a + b) / times.length;
+			// Get the average time (ms) it took the last 5 tokens to generate
+
+			if (!streaming.typeyTimeout) return;
+			if (!streaming.windowOpen) return;
+			if (!smoothStreamingEnabled) return;
+			streaming.typeyTimeout = setTimeout(_char, avg);
+
+			if (!streaming.buffer.length) return;
+
+			streamBuffer.textContent += streaming.buffer[0];
+			streaming.buffer = streaming.buffer.slice(1);
+		}
+
+		streaming.typeyTimeout = setTimeout(_char, 10);
+	}
+
+	if (!streaming.time.preTime) streaming.time.preTime = new Date();
+
+	streaming.time.msBuffer.push(
+		(new Date().getTime() - streaming.time.preTime.getTime()) / 5
+		// 5 chosen because Concedo said something about 5 this morning and it seems to work
+	);
+
+	if (streaming.time.msBuffer.length > 5) streaming.time.msBuffer.shift();
+	streaming.time.preTime = new Date();
+
+	if (smoothStreamingEnabled) {
+		streaming.buffer += tokens[0];
+	} else {
+		streamBuffer.textContent += tokens[0];
+	}
 }
 
 function save_preset() {
@@ -3391,16 +3679,36 @@ function update_story_picture(chunk_id) {
 	image.setAttribute("chunk", chunk_id);
 }
 
+function maybe_enable_privacy_mode() {
+	const password = document.getElementById("user_privacy_password").value;
+
+	if (!password) {
+		showNotification(
+			"Lock Failed",
+			"Please set a password before locking KoboldAI.",
+			"error"
+		)
+		return;
+	}
+
+	socket.emit("privacy_mode", {'enabled': true})
+}
+
 function privacy_mode(enabled) {
+	privacy_mode_enabled = enabled;
+	updateTitle();
+
+	const sideMenu = document.getElementById("SideMenu");
+	const mainGrid = document.getElementById("main-grid");
+	const rightSideMenu = document.getElementById("rightSideMenu");
+
+	for (const menu of [sideMenu, mainGrid, rightSideMenu]) {
+		menu.classList.toggle("superblur", enabled);
+	}
+
 	if (enabled) {
-		document.getElementById('SideMenu').classList.add("superblur");
-		document.getElementById('main-grid').classList.add("superblur");
-		document.getElementById('rightSideMenu').classList.add("superblur");
 		openPopup("privacy_mode");
 	} else {
-		document.getElementById('SideMenu').classList.remove("superblur");
-		document.getElementById('main-grid').classList.remove("superblur");
-		document.getElementById('rightSideMenu').classList.remove("superblur");
 		if (!$el("#privacy_mode").classList.contains("hidden")) closePopups();
 		document.getElementById('privacy_password').value = "";
 	}
@@ -3505,6 +3813,21 @@ function stop_tts() {
 	}
 }
 
+function download_tts() {
+	document.getElementById("download_tts").innerText = "hourglass_empty";
+	socket.emit("gen_full_audio", {}, download_actual_file_tts);
+}
+
+function download_actual_file_tts(data) {
+	if (data) {
+		var link = document.createElement("a");
+		link.download = document.getElementsByClassName("var_sync_story_story_name ")[0].text+".ogg";
+		link.href = "/audio_full";
+		link.click();
+		document.getElementById("download_tts").innerText = "download";
+	}
+}
+
 function finished_tts() {
 	next_action = parseInt(document.getElementById("reader").getAttribute("action_id"))+1;
 	action_count = parseInt(document.getElementById("action_count").textContent);
@@ -3535,6 +3858,29 @@ function tts_playing() {
 	}
 	if (action) {
 		action.classList.add("tts_playing");
+	}
+}
+
+function set_image_action(action_id) {
+	console.log(action_id);
+	socket.emit("get_story_image", {action_id: action_id}, change_image);
+}
+
+function change_image(data) {
+	image_area = document.getElementById("action image");
+
+	let maybeImage = image_area.getElementsByClassName("action_image")[0];
+	if (maybeImage) maybeImage.remove();
+
+	$el("#image-loading").classList.add("hidden");
+
+	if (data != undefined) {
+		var image = new Image();
+		image.src = 'data:image/png;base64,'+data;
+		image.classList.add("action_image");
+		image.setAttribute("context-menu", "generated-image");
+		image.addEventListener("click", imgGenView);
+		image_area.appendChild(image);
 	}
 }
 
@@ -4216,161 +4562,139 @@ function removeA(arr) {
     return arr;
 }
 
-function add_tags(tags, data) {
-	while (tags.firstChild) { 
-		tags.removeChild(tags.firstChild);
+function create_tag_element(tagText, uid, tagType) {
+	// tagText is string, or null for empty tag at end.
+	// barType should be "primary" or "secondary"
+	const isPlaceholderTag = tagText === null;
+
+	const wiCardEl = document.querySelector(`.world_info_card[uid="${uid}"]`)
+	const keyField = {primary: "key", secondary: "keysecondary"}[tagType];
+	const tagClassFragment = {primary: "tags", primary: "secondtags"}[tagType];
+
+	const tagEl = document.createElement("span");
+	tagEl.classList.add("tag");
+	if (isPlaceholderTag) tagEl.classList.add("placeholder_tag");
+
+	const xEl = document.createElement("span");
+	xEl.classList.add("material-icons-outlined");
+	xEl.classList.add("tag_button");
+
+	if (!isPlaceholderTag) {
+		xEl.classList.add("delete_icon");
+		xEl.textContent = "close";
+	} else {
+		xEl.classList.add("add_icon");
+		xEl.textContent = "add";
 	}
-	for (tag of data.key) {
-		tag_item = document.createElement("span");
-		tag_item.classList.add("tag");
-		x = document.createElement("span");
-		x.textContent = "x ";
-		x.classList.add("delete_icon");
-		x.setAttribute("uid", data.uid);
-		x.setAttribute("tag", tag);
-		x.onclick = function () {
-						removeA(world_info_data[this.getAttribute('uid')]['key'], this.getAttribute('tag'));
-						send_world_info(this.getAttribute('uid'));
-						this.classList.add("pulse");
-					};
-		text = document.createElement("span");
-		text.textContent = tag;
-		text.setAttribute("contenteditable", true);
-		text.setAttribute("uid", data.uid);
-		text.setAttribute("tag", tag);
-		text.id = "world_info_tags_text_"+data.uid+"_"+tag;
-		text.ondragstart=function() {event.preventDefault();event.stopPropagation();};
-		text.setAttribute("draggable", "true");
-		text.onfocus=function() {this.parentElement.parentElement.parentElement.setAttribute('draggable', 'false');this.setAttribute('draggable', 'false');};
-		text.onblur = function () {
-						this.parentElement.parentElement.parentElement.setAttribute('draggable', 'true');
-						this.setAttribute('draggable', 'true');
-						for (var i = 0; i < world_info_data[this.getAttribute('uid')]['key'].length; i++) {
-							if (world_info_data[this.getAttribute('uid')]['key'][i] == this.getAttribute("tag")) {
-								world_info_data[this.getAttribute('uid')]['key'][i] = this.textContent;
-							}
-						}
-						send_world_info(this.getAttribute('uid'));
-						this.classList.add("pulse");
-					};
-		tag_item.append(x);
-		tag_item.append(text);
-		tag_item.id = "world_info_tags_"+data.uid+"_"+tag;
-		tags.append(tag_item);
-	}
-	//add the blank tag
-	tag_item = document.createElement("span");
-	tag_item.classList.add("tag");
-	x = document.createElement("span");
-	x.textContent = "+ ";
-	tag_item.append(x);
-	text = document.createElement("span");
-	text.classList.add("rawtext");
-	text.textContent = "    ";
-	text.setAttribute("uid", data.uid);
-	text.setAttribute("contenteditable", true);
-	text.id = "world_info_tags_text_"+data.uid+"_blank";
-	text.ondragstart=function() {event.preventDefault();event.stopPropagation();};
-	text.setAttribute("draggable", "true");
-	text.onfocus=function() {this.parentElement.parentElement.parentElement.setAttribute('draggable', 'false');this.setAttribute('draggable', 'false');};
-	text.onblur = function () {
-					this.parentElement.parentElement.parentElement.setAttribute('draggable', 'true');
-					this.setAttribute('draggable', 'true');
-					if (this.textContent.trim() != "") {
-						//console.log(this.textContent);
-						on_new_wi_item = this.id;
-						world_info_data[this.getAttribute('uid')]['key'].push(this.textContent);
-						send_world_info(this.getAttribute('uid'));
-						this.classList.add("pulse");
-					} else {
-						this.textContent = "    ";
-					}
-				};
-	text.onclick = function () {
-					this.textContent = "";
-				};
-	tag_item.append(text);
-	tag_item.id = "world_info_secondtags_"+data.uid+"_new";
-	tags.append(tag_item);
+
+	xEl.setAttribute("uid", uid);
+	xEl.setAttribute("tag", tagText);
+	xEl.addEventListener("click", function() {
+		removeA(
+			world_info_data[uid][keyField],
+			tagText
+		);
+		send_world_info(uid);
+		this.classList.add("pulse");
+	});
+
+	const textEl = document.createElement("span");
+	textEl.classList.add("tag_text");
+	textEl.textContent = tagText;
+
+	textEl.setAttribute("data-placeholder", "Tag")
+	textEl.setAttribute("contenteditable", true);
+	textEl.setAttribute("uid", uid);
+	textEl.setAttribute("tag", tagText);
+	textEl.setAttribute("draggable", "true");
+	textEl.id = `world_info_${tagClassFragment}_text_${uid}_${tagText || "blank"}`;
+
+	textEl.addEventListener("dragstart", function(event) {
+		event.preventDefault();
+		event.stopPropagation();
+	});
+
+	textEl.addEventListener("focus", function(event) {
+		wiCardEl.setAttribute('draggable', 'false');
+		this.setAttribute('draggable', 'false');
+	});
+
+	textEl.addEventListener("blur", function () {
+		wiCardEl.setAttribute('draggable', 'true');
+		this.setAttribute('draggable', 'true');
+
+		if (!isPlaceholderTag) {
+			// Normal tag
+			for (var i = 0; i < world_info_data[uid][keyField].length; i++) {
+				if (world_info_data[uid][keyField][i] !== tagText) {
+					world_info_data[uid][keyField][i] = this.innerText;
+				}
+			}
+		} else {
+			// Placeholder tag
+			if (!this.textContent.trim()) return;
+
+			on_new_wi_item = this.id;
+			world_info_data[uid][keyField].push(this.textContent);
+		}
+
+		send_world_info(uid);
+		this.classList.add("pulse");
+	});
+
+	textEl.addEventListener("keydown", function(event) {
+		if (event.key === "Enter") {
+			// Press Enter to save tag and focus next one
+			event.preventDefault();
+
+			// HACK: Work around the fact that the server is in control of
+			// placing these elements
+			attention_wanting_wi_bar = tagType;
+			// And don't wait for like 10000 years to randomly take focus from
+			// the user
+			setTimeout(() => attention_wanting_wi_bar = null, 500);
+
+			this.blur();
+		} else if (event.key === "Escape") {
+
+		}
+	})
+
+	tagEl.append(xEl);
+	tagEl.append(textEl);
+	tagEl.id = `world_info_${tagClassFragment}_${uid}_${tagText || "new"}`;
+
+	return tagEl;
 }
 
-function add_secondary_tags(tags, data) {
-	while (tags.firstChild) { 
-		tags.removeChild(tags.firstChild);
+function add_tags(tagBarEl, data, tagType) {
+	// tagType is either "primary" or "secondary"
+
+	// Remove existing tags
+	while (tagBarEl.firstChild) {
+		tagBarEl.removeChild(tagBarEl.firstChild);
 	}
-	for (tag of data.keysecondary) {
-		tag_item = document.createElement("span");
-		tag_item.classList.add("tag");
-		x = document.createElement("span");
-		x.textContent = "x ";
-		x.classList.add("delete_icon");
-		x.setAttribute("uid", data.uid);
-		x.setAttribute("tag", tag);
-		x.onclick = function () {
-						removeA(world_info_data[this.getAttribute('uid')]['keysecondary'], this.getAttribute('tag'));
-						send_world_info(this.getAttribute('uid'));
-						this.classList.add("pulse");
-					};
-		text = document.createElement("span");
-		text.textContent = tag;
-		text.setAttribute("contenteditable", true);
-		text.setAttribute("uid", data.uid);
-		text.setAttribute("tag", tag);
-		text.id = "world_info_secondtags_text_"+data.uid+"_"+tag;
-		text.ondragstart=function() {event.preventDefault();event.stopPropagation();};
-		text.setAttribute("draggable", "true");
-		text.onfocus=function() {this.parentElement.parentElement.parentElement.setAttribute('draggable', 'false');this.setAttribute('draggable', 'false');};
-		text.onblur = function () {
-						this.parentElement.parentElement.parentElement.setAttribute('draggable', 'true');
-						this.setAttribute('draggable', 'true');
-						for (var i = 0; i < world_info_data[this.getAttribute('uid')]['keysecondary'].length; i++) {
-							if (world_info_data[this.getAttribute('uid')]['keysecondary'][i] == this.getAttribute("tag")) {
-								world_info_data[this.getAttribute('uid')]['keysecondary'][i] = this.textContent;
-							}
-						}
-						send_world_info(this.getAttribute('uid'));
-						this.classList.add("pulse");
-					};
-		tag_item.append(x);
-		tag_item.append(text);
-		tag_item.id = "world_info_secondtags_"+data.uid+"_"+tag;
-		tags.append(tag_item);
+
+	const tagList = {
+		primary: data.key,
+		secondary: data.keysecondary
+	}[tagType];
+
+	for (tag of tagList) {
+		tagBarEl.append(create_tag_element(tag, data.uid, tagType));
 	}
+
 	//add the blank tag
-	tag_item = document.createElement("span");
-	tag_item.classList.add("tag");
-	x = document.createElement("span");
-	x.textContent = "+ ";
-	tag_item.append(x);
-	text = document.createElement("span");
-	text.classList.add("rawtext");
-	text.textContent = "    ";
-	text.setAttribute("uid", data.uid);
-	text.setAttribute("contenteditable", true);
-	text.id = "world_info_secondtags_text_"+data.uid+"_blank";
-	text.ondragstart=function() {event.preventDefault();event.stopPropagation();};
-	text.setAttribute("draggable", "true");
-	text.onfocus=function() {this.parentElement.parentElement.parentElement.setAttribute('draggable', 'false');this.setAttribute('draggable', 'false');};
-	text.onblur = function () {
-					this.parentElement.parentElement.parentElement.setAttribute('draggable', 'true');
-					this.setAttribute('draggable', 'true');
-					if (this.textContent.trim() != "") {
-						on_new_wi_item = this.id;
-						world_info_data[this.getAttribute('uid')]['keysecondary'].push(this.textContent);
-						send_world_info(this.getAttribute('uid'));
-						this.classList.add("pulse");
-					} else {
-						this.textContent = "    ";
-					}
-				};
-	text.onclick = function () {
-					this.textContent = "";
-				};
-	tag_item.append(text);
-	tag_item.id = "world_info_secondtags_"+data.uid+"_new";
-	tags.append(tag_item);
+	const placeholderTagEl = create_tag_element(null, data.uid, tagType);
+	tagBarEl.append(placeholderTagEl);
+
+	if (attention_wanting_wi_bar === tagType) {
+		const textEl = placeholderTagEl.querySelector(".tag_text");
+		// HACK: Please don't ask because I do not know
+		setTimeout(() => textEl.focus(), 1);
+	}
 }
-	
+
 function create_new_wi_entry(folder) {
 	var uid = -1;
 	for (item of document.getElementsByClassName('world_info_card')) {
@@ -4697,7 +5021,7 @@ function close_menus() {
 	document.getElementById("main-grid").classList.remove("story_menu-open");
 	
 	//close popup menus
-	closePopups();
+	closePopups(true);
 	
 	//unselect sampler items
 	for (temp of document.getElementsByClassName("sample_order")) {
@@ -4723,11 +5047,17 @@ function toggle_flyout_right(x) {
 		x.classList.remove("change");
 		document.getElementById("rightSideMenu").classList.remove("open");
 		document.getElementById("main-grid").classList.remove("story_menu-open");
+		//need to set the layer priority back down
+		document.getElementById("rightSideMenu").classList.remove("high_z");
+		document.getElementById("story_menu_icon").classList.remove("high_z");
 	} else {
 		x.classList.add("change");
 		document.getElementById("rightSideMenu").classList.add("open");
 		document.getElementById("main-grid").classList.add("story_menu-open");
 		document.getElementById("story_menu_pin").classList.remove("hidden");
+		//need to set the layer priority up (due to mobile overlap
+		document.getElementById("rightSideMenu").classList.add("high_z");
+		document.getElementById("story_menu_icon").classList.add("high_z");
 	}
 }
 
@@ -4807,46 +5137,41 @@ function getCookie(cname, default_return=null) {
 }
 
 function detect_enter_submit(e) {
-	if (((e.code == "Enter") || (e.code == "NumpadEnter")) && !(shift_down)) {
-		if (typeof e.stopPropagation != "undefined") {
-			e.stopPropagation();
-		} else {
-			e.cancelBubble = true;
-		}
-		//console.log("submitting");
-		document.getElementById("btnsubmit").onclick();
-		setTimeout(function() {document.getElementById('input_text').value = '';}, 1);
+	if (e.shiftKey) return;
+	if (!["Enter", "NumpadEnter"].includes(e.key)) return;
+
+	if (typeof e.stopPropagation != "undefined") {
+		e.stopPropagation();
+	} else {
+		e.cancelBubble = true;
 	}
+
+	//console.log("submitting");
+	document.getElementById("btnsubmit").onclick();
+	setTimeout(function() {document.getElementById('input_text').value = '';}, 1);
 }
 
 function detect_enter_text(e) {
-	if (((e.code == "Enter") || (e.code == "NumpadEnter")) && !(shift_down)) {
-		if (typeof e.stopPropagation != "undefined") {
-			e.stopPropagation();
-		} else {
-			e.cancelBubble = true;
-		}
-		//get element
-		//console.log("Doing Text Enter");
-		//console.log(e.currentTarget.activeElement);
-		if (e.currentTarget.activeElement != undefined) {
-			var item = $(e.currentTarget.activeElement);
-			item.onchange();
-		}
+	if (e.shiftKey) return;
+	if (!["Enter", "NumpadEnter"].includes(e.key)) return;
+
+	if (typeof e.stopPropagation != "undefined") {
+		e.stopPropagation();
+	} else {
+		e.cancelBubble = true;
+	}
+	//get element
+	//console.log("Doing Text Enter");
+	//console.log(e.currentTarget.activeElement);
+	if (e.currentTarget.activeElement != undefined) {
+		var item = $(e.currentTarget.activeElement);
+		item.onchange();
 	}
 }
 
 function detect_key_down(e) {
-	if ((e.code == "ShiftLeft") || (e.code == "ShiftRight")) {
-		shift_down = true;
-	} else if (e.code == "Escape") {
+	if (e.code == "Escape") {
 		close_menus();
-	}
-}
-
-function detect_key_up(e) {
-	if ((e.code == "ShiftLeft") || (e.code == "ShiftRight")) {
-		shift_down = false;
 	}
 }
 
@@ -5789,8 +6114,21 @@ function position_context_menu(contextMenu, x, y) {
 		right: x + width,
 	};
 
+	// Slide over if running against the window bounds.
 	if (farMenuBounds.right > bounds.right) x -= farMenuBounds.right - bounds.right;
-	if (farMenuBounds.bottom > bounds.bottom) y -= farMenuBounds.bottom - bounds.bottom;
+
+	if (farMenuBounds.bottom > bounds.bottom) {
+		// We've hit the bottom.
+
+		// The old algorithm pushed the menu against the wall, similar to what's
+		// done on the x-axis:
+		// y -= farMenuBounds.bottom - bounds.bottom;
+		// But now, we make the box change its emission direction from the cursor:
+		y -= (height + 5);
+		// The main advantage of this approach is that the cursor is never directly
+		// placed above a context menu item immediately after activating the context
+		// menu. (Thus the 5px offset also added)
+	}
 
 	contextMenu.style.left = `${x}px`;
 	contextMenu.style.top = `${y}px`;
@@ -5798,8 +6136,15 @@ function position_context_menu(contextMenu, x, y) {
 
 function updateTitle() {
 	const titleInput = $el(".var_sync_story_story_name");
-	if (!titleInput.innerText) return;
-	document.title = `${titleInput.innerText} - KoboldAI Client`;
+	let titleText = "Story";
+
+	if (!privacy_mode_enabled && titleInput.innerText) {
+		titleText = titleInput.innerText;
+	} else {
+		titleText = "[🔒]"
+	}
+
+	document.title = `${titleText} - KoboldAI Client`;
 }
 
 function openClubImport() {
@@ -5810,7 +6155,6 @@ function openClubImport() {
 //// INIT ////
 
 document.onkeydown = detect_key_down;
-document.onkeyup = detect_key_up;
 document.getElementById("input_text").onkeydown = detect_enter_submit;
 
 /* -- Popups -- */
@@ -5834,17 +6178,38 @@ function openPopup(id) {
 	}
 }
 
-function closePopups() {
+function closePopups(userAction=false) {
+	// userAction specifies if a user tried to close the popup by normal means
+	// (ESC, clicking outside the menu, etc).
 	const container = $el("#popup-container");
-	container.classList.add("hidden");
+	let allHidden = true;
 
 	for (const popupWindow of container.children) {
+		// Do not let the user close windows they shouldn't be! Sneaky devils!
+		if (userAction && popupWindow.getAttribute("allow-close") === "false" && !popupWindow.classList.contains("hidden")) {
+			allHidden = false;
+			continue;
+		}
+
 		popupWindow.classList.add("hidden");
 	}
+
+	if (allHidden) container.classList.add("hidden");
+}
+
+function hide_welcome_container() {
+		welcome_container = document.getElementById("welcome_container");
+		welcome_container.classList.add("hidden");
+		document.getElementById("Selected Text").focus();
+}
+
+function show_welcome_container() {
+	welcome_container = document.getElementById("welcome_container");
+	welcome_container.classList.remove("hidden");
 }
 
 $el("#popup-container").addEventListener("click", function(event) {
-	if (event.target === this) closePopups();
+	if (event.target === this) closePopups(true);
 });
 
 /* -- Colab Cookie Handling -- */
@@ -6048,21 +6413,23 @@ process_cookies();
 				continue;
 			}
 
+			const enableCriteriaIsFunction = typeof action.enabledOn === "function"
 
-			let item = $e("div", contextMenu, {
+			const itemEl = $e("div", contextMenu, {
 				classes: ["context-menu-item", "noselect", `context-menu-${key}`],
-				"enabled-on": action.enabledOn,
+				"enabled-on": enableCriteriaIsFunction ? "CALLBACK" : action.enabledOn,
 				"cache-index": context_menu_cache.length
 			});
+			itemEl.enabledOnCallback = action.enabledOn;
 
 			context_menu_cache.push({shouldShow: action.shouldShow});
 
-			let icon = $e("span", item, {classes: ["material-icons-outlined"], innerText: action.icon});
-			item.append(action.label);
+			const icon = $e("span", itemEl, {classes: ["material-icons-outlined"], innerText: action.icon});
+			$e("span", itemEl, {classes: ["context-menu-label"], innerText: action.label});
 
-			item.addEventListener("mousedown", e => e.preventDefault());
+			itemEl.addEventListener("mousedown", e => e.preventDefault());
 			// Expose the "summonEvent" to enable access to original context menu target.
-			item.addEventListener("click", () => action.click(summonEvent));
+			itemEl.addEventListener("click", () => action.click(summonEvent));
 		}
 	}
 
@@ -6085,6 +6452,10 @@ process_cookies();
 
 		// Show only applicable actions in the context menu
 		let contextMenuType = target.getAttribute("context-menu");
+
+		// If context menu is not present, return
+		if (!context_menu_actions[contextMenuType]) return;
+
 		for (const contextMenuItem of contextMenu.childNodes) {
 			let shouldShow = contextMenuItem.classList.contains(`context-menu-${contextMenuType}`);
 
@@ -6112,10 +6483,10 @@ process_cookies();
 
 		// Disable non-applicable items
 		$(".context-menu-item").addClass("disabled");
-		
+
 		// A selection is made
 		if (getSelectionText()) $(".context-menu-item[enabled-on=SELECTION]").removeClass("disabled");
-		
+
 		// The caret is placed
 		if (get_caret_position(target) !== null) $(".context-menu-item[enabled-on=CARET]").removeClass("disabled");
 
@@ -6123,6 +6494,11 @@ process_cookies();
 		if ($el(".action_image")) $(".context-menu-item[enabled-on=GENERATED-IMAGE]").removeClass("disabled");
 
 		$(".context-menu-item[enabled-on=ALWAYS]").removeClass("disabled");
+
+		for (const contextMenuItem of document.querySelectorAll(".context-menu-item[enabled-on=CALLBACK]")) {
+			if (!contextMenuItem.enabledOnCallback()) continue;
+			contextMenuItem.classList.remove("disabled");
+		}
 
 		// Make sure hr isn't first or last visible element
 		let visibles = [];
@@ -6679,9 +7055,13 @@ function sFormatted2HTML(sFormatted) {
 	return outHTML;
 }
 
-function deleteConfirmation(sFormatted, confirmText, denyText, confirmCallback, denyCallback) {
+function deleteConfirmation(sFormatted, confirmText, denyText, confirmCallback, denyCallback=null, bypass=false) {
+	if (bypass) {
+		confirmCallback();
+		return;
+	}
+
 	$el("#confirm-text").innerHTML = sFormatted2HTML(sFormatted);
-	
 	$el("#confirm-confirm-button > .text").innerText = confirmText;
 	$el("#confirm-deny-button > .text").innerText = denyText;
 
@@ -6730,6 +7110,22 @@ $el("#generate-image-button").addEventListener("click", function() {
 	$el("#image-loading").classList.remove("hidden");
 	socket.emit("generate_image", {});
 });
+
+function generate_image() {
+	let chunk = null;
+	for (element of document.getElementsByClassName("editing")) {
+		if (element.id == 'story_prompt') {
+			chunk = -1
+		} else {
+			chunk = parseInt(element.id.split(" ").at(-1));
+		}
+	}
+	if (chunk != null) {
+		socket.emit("generate_image", {action_id: chunk});
+	}
+	
+	
+}
 
 /* -- Shiny New Chat -- */
 function addMessage(author, content, actionId, afterMsgEl=null, time=null) {
@@ -7496,4 +7892,32 @@ $el("#gamescreen").addEventListener("paste", function(event) {
 		false,
 		event.clipboardData.getData("text/plain")
 	);
+});
+
+const gameText = document.getElementById("Selected Text");
+gameText.addEventListener("click", function(event) {
+	if (ai_busy) {
+		event.stopPropagation();
+		return;
+	};
+
+	set_edit(event);
+});
+
+gameText.addEventListener("focusout", function(event) {
+	if (ai_busy) {
+		event.stopPropagation();
+		return;
+	};
+
+	savegametextchanges();
+});
+
+gameText.addEventListener("paste", function(event) {
+	if (ai_busy) {
+		event.stopPropagation();
+		return;
+	};
+
+	check_game_after_paste();
 });

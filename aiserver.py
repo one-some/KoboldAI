@@ -59,6 +59,7 @@ import argparse
 import sys
 import gc
 import traceback
+from queue import Queue
 
 import lupa
 # Hack to make the new Horde worker understand its imports...
@@ -637,7 +638,7 @@ def UI_2_log_history(message):
         del web_log_history[0]
     web_log_history.append(data)
 
-from flask import Flask, render_template, Response, request, copy_current_request_context, send_from_directory, session, jsonify, abort, redirect, has_request_context, send_file
+from flask import Flask, render_template, Response, request, copy_current_request_context, send_from_directory, session, jsonify, abort, redirect, has_request_context, send_file, stream_with_context
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_socketio import emit as _emit
 from flask_session import Session
@@ -3449,7 +3450,7 @@ def actionsubmit(
                 emit('from_server', {'cmd': 'scrolldown', 'data': ''}, broadcast=True, room="UI_1")
                 break
 
-def apiactionsubmit_generate(txt, minimum, maximum, stream_callback):
+def apiactionsubmit_generate(txt, minimum, maximum, stream_callback=None):
     koboldai_vars.generated_tkns = 0
 
     if not koboldai_vars.quiet:
@@ -3511,7 +3512,7 @@ def apiactionsubmit_tpumtjgenerate(txt, minimum, maximum):
 
     return genout
 
-def apiactionsubmit(data, use_memory=False, use_world_info=False, use_story=False, use_authors_note=False):
+def apiactionsubmit(data, use_memory=False, use_world_info=False, use_story=False, use_authors_note=False, stream_callback=None):
     if not model or not model.capabilties.api_host:
         raise NotImplementedError(f"API generation isn't allowed on model '{koboldai_vars.model}'")
 
@@ -8259,6 +8260,7 @@ class GenerationInputSchema(SamplerSettingsSchema):
     sampler_seed: Optional[int] = fields.Integer(validate=validate.Range(min=0, max=2**64 - 1), metadata={"description": "RNG seed to use for sampling. If not specified, the global RNG will be used."})
     sampler_full_determinism: Optional[bool] = fields.Boolean(metadata={"description": "If enabled, the generated text will always be the same as long as you use the same RNG seed, input and settings. If disabled, only the *sequence* of generated texts that you get when repeatedly generating text will be the same given the same RNG seed, input and settings."})
     stop_sequence: Optional[List[str]] = fields.List(fields.String(),metadata={"description": "An array of string sequences where the API will stop generating further tokens. The returned text WILL contain the stop sequence."})
+    stream_response: Optional[bool] = fields.Boolean(metadata={"description": "When enabled, generated output will be streamed to the requester."})
 
 
 class GenerationResultSchema(KoboldSchema):
@@ -8440,18 +8442,43 @@ def _generate_text(body: GenerationInputSchema):
                 raise RuntimeError
             old_spfilename = koboldai_vars.spfilename
             spRequest(body.soft_prompt.strip())
-        
-        stream_callback = None
-        if body.get("stream_response") == "true":
-            def generate():
-                def stream_callback(data):
-                    print("HI", data)
-                    yield f"{','.join(row)}\n"
 
-            return generate(), {"Content-Type": "text/csv"}
+        if getattr(body, "stream_response", None) == True:
+            stream_queue = Queue()
+            print("Streamy time")
+
+            def _stream(data):
+                print("[source] Put:", data)
+                stream_queue.put(data)
+
+            def forward_queue():
+                for dat in iter(stream_queue.get, None):
+                    print(f"[recieve] Get: {dat}")
+                    yield json.dumps(dat) + "\n"
+
+            print("b4 thread")
+            # eventlet.spawn(
+            socketio.start_background_task(
+            # tpool.execute(
+                apiactionsubmit,
+                body.prompt,
+                use_memory=body.use_memory,
+                use_story=body.use_story,
+                use_world_info=body.use_world_info,
+                use_authors_note=body.use_authors_note,
+                stream_callback=_stream
+            )
+            print("After thread (shouldn't be waiting!!!)")
+            return Response(stream_with_context(forward_queue()))
 
 
-        genout = apiactionsubmit(body.prompt, use_memory=body.use_memory, use_story=body.use_story, use_world_info=body.use_world_info, use_authors_note=body.use_authors_note)
+        genout = apiactionsubmit(
+            body.prompt,
+            use_memory=body.use_memory,
+            use_story=body.use_story,
+            use_world_info=body.use_world_info,
+            use_authors_note=body.use_authors_note,
+        )
 
         output = {"results": [{"text": txt} for txt in genout]}
     finally:

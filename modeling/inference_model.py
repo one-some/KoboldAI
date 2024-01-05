@@ -573,7 +573,7 @@ class InferenceModel:
             tpu_dynamic_inference (bool, optional): Whether to use dynamic TPU inference or static. Defaults to False.
             seed (int, optional): If set, this seed will be used for inference. Defaults to None.
             gen_mode (GenerationMode): Special generation mode. Defaults to GenerationMode.STANDARD.
-            callback (callable, optional): If set, this callback will be called for each token generated in inference. Defaults to None.
+            stream_callback (callable, optional): If set, this callback will be called for each token generated in inference. Defaults to None.
 
         Raises:
             ValueError: If prompt type is weird
@@ -632,6 +632,7 @@ class InferenceModel:
 
         assert isinstance(prompt_tokens, np.ndarray)
         assert len(prompt_tokens.shape) == 1
+
         modeling.post_token_hooks.ephemeral_callback_hook = stream_callback
 
         time_start = time.time()
@@ -661,6 +662,10 @@ class InferenceModel:
 
         for stopper in temp_stoppers:
             self.stopper_hooks.remove(stopper)
+
+        if stream_callback:
+            # Tell the callback that the show's over
+            stream_callback(None)
 
         return result
 

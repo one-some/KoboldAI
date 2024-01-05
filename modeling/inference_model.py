@@ -14,6 +14,7 @@ from transformers import (
     AutoTokenizer,
     LlamaTokenizer,
 )
+import modeling
 from modeling.stoppers import Stoppers
 from modeling.tokenizer import GenericTokenizer
 from modeling import logits_processors
@@ -270,6 +271,8 @@ class InferenceModel:
         self,
         text: list,
         found_entries: set,
+        gen_mode: GenerationMode = GenerationMode.STANDARD,
+        stream_callback: Callable = None,
     ):
         """Generate story text. Heavily tied to story-specific parameters; if
         you are making a new generation-based feature, consider `generate_raw()`.
@@ -277,10 +280,12 @@ class InferenceModel:
         Args:
             text (list): Encoded input tokens
             found_entries (set): Entries found for Dynamic WI
+            gen_mode (GenerationMode): The GenerationMode to pass to raw_generate. Defaults to GenerationMode.STANDARD
+            stream_callback (callable, optional): If set, this callback will be called for each token generated in inference. Defaults to None.
 
         Raises:
-            RuntimeError: if inconsistancies are detected with the internal state and Lua state -- sanity check
-            RuntimeError: if inconsistancies are detected with the internal state and core stopper -- sanity check
+            RuntimeError: if inconsistencies are detected with the internal state and Lua state -- sanity check
+            RuntimeError: if inconsistencies are detected with the internal state and core stopper -- sanity check
         """
 
         start_time = time.time()
@@ -372,6 +377,8 @@ class InferenceModel:
                         seed=utils.koboldai_vars.seed
                         if utils.koboldai_vars.full_determinism
                         else None,
+                        gen_mode=gen_mode,
+                        stream_callback=stream_callback,
                     )
                     logger.debug(
                         "core_generate: run raw_generate pass {} {}s".format(
@@ -546,6 +553,8 @@ class InferenceModel:
         found_entries: set = (),
         tpu_dynamic_inference: bool = False,
         seed: Optional[int] = None,
+        gen_mode: GenerationMode = GenerationMode.STANDARD,
+        stream_callback: Callable = None,
         **kwargs,
     ) -> GenerationResult:
         """A wrapper around `_raw_generate()` that handles gen_state and other stuff. Use this to generate text outside of the story.
@@ -561,6 +570,10 @@ class InferenceModel:
             is_core (bool, optional): Whether this generation is a core story generation. Defaults to False.
             single_line (bool, optional): Generate one line only.. Defaults to False.
             found_entries (set, optional): Entries found for Dynamic WI. Defaults to ().
+            tpu_dynamic_inference (bool, optional): Whether to use dynamic TPU inference or static. Defaults to False.
+            seed (int, optional): If set, this seed will be used for inference. Defaults to None.
+            gen_mode (GenerationMode): Special generation mode. Defaults to GenerationMode.STANDARD.
+            callback (callable, optional): If set, this callback will be called for each token generated in inference. Defaults to None.
 
         Raises:
             ValueError: If prompt type is weird
@@ -634,7 +647,12 @@ class InferenceModel:
             )
 
         time_end = round(time.time() - time_start, 2)
-        tokens_per_second = round(len(result.encoded[0]) / time_end, 2)
+
+        try:
+            tokens_per_second = round(len(result.encoded[0]) / time_end, 2)
+        except ZeroDivisionError:
+            # Introducing KoboldAI's fastest model: ReadOnly!
+            tokens_per_second = 0
 
         if not utils.koboldai_vars.quiet:
             logger.info(

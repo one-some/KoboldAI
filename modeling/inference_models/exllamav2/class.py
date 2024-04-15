@@ -61,39 +61,44 @@ class LayerSplitExLlamaV2(ExLlamaV2):
 
         current_index = 0
         for i, module in enumerate(self.modules):
+            target_device = None
 
             if i == 0 and embed_cpu:
                 # Put token embeddings on CPU if asked for (default)
+
+                # On CPU so no further magic tricks needed for memory
                 module.set_device_idx(-1)
                 continue
             elif isinstance(module, ExLlamaV2Attention):
-                # The weight of attention heads is like 1/3 of the weight of
+                # The size of attention heads is like 1/3 of the size of
                 # hidden layers so we'll just stick it after the last hidden
                 # layer (assuming they are sequential).
-                module.set_device_idx(current_index)
-                continue
+                target_device = current_index
             elif isinstance(module, ExLlamaV2RMSNorm) or isinstance(module, ExLlamaV2Linear):
                 # Norm and head layers are silently stuck in Device 0 like
                 # the ExLlama backend. Around twice the size of a hidden layer
                 # in my test model.
-                module.set_device_idx(0)
-                continue
+                target_device = 0
+            else:
+                device_map[current_index] -= 1
+                if device_map[current_index] < 0:
+                    current_index += 1
+                    assert current_index < len(device_map), f"Requested device doesn't exist in map @ idx {i}"
+                target_device = current_index
 
-
-            device_map[current_index] -= 1
-            if device_map[current_index] < 0:
-                current_index += 1
-                assert current_index < len(device_map), f"Requested device doesn't exist in map @ idx {i}"
+            assert isinstance(target_device, int), "Target device not set in loop."
 
             scratch_fixed = module.scratch_space_fixed()
-            fixed_bytes[current_index] = max(scratch_fixed, fixed_bytes[current_index])
+            fixed_bytes[target_device] = max(scratch_fixed, fixed_bytes[target_device])
 
-            module.set_device_idx(current_index)
+            module.set_device_idx(target_device)
 
-        # Will possibly combust due to skipping some layers
+        # Should no longer combust due to skipping layers (see united #515)
         self.device_tensors = []
         for idx, scratch_bytes in enumerate(fixed_bytes):
-            self.device_tensors.append(ExLlamaV2DeviceTensors(self, idx, scratch_bytes))
+            self.device_tensors.append(
+                ExLlamaV2DeviceTensors(self, idx, scratch_bytes)
+            )
 
         self.set_cache_map()
 
@@ -303,7 +308,9 @@ class model_backend(InferenceModel):
 
             if warper == warpers.RepetitionPenalty:
                 # Rep pen needs more data than other samplers
-                scores = warper.torch(scores, input_ids=input_ids.cuda())
+
+                # Cast input_ids to same device as scores, depends on user device configuration
+                scores = warper.torch(scores, input_ids=input_ids.to(scores.device))
             else:
                 scores = warper.torch(scores)
 

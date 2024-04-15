@@ -27,10 +27,7 @@ try:
 
 
     from exllamav2.cache import ExLlamaV2Cache
-    from exllamav2.model import ExLlamaV2, ExLlamaV2Config, ExLlamaV2DeviceTensors
-    from exllamav2.attn import ExLlamaV2Attention
-    from exllamav2.rmsnorm import ExLlamaV2RMSNorm
-    from exllamav2.linear import ExLlamaV2Linear
+    from exllamav2.model import ExLlamaV2, ExLlamaV2Config
     from transformers import LlamaTokenizer
     from exllamav2.generator import ExLlamaV2StreamingGenerator
     load_failed = False
@@ -117,7 +114,6 @@ class model_backend(InferenceModel):
 
         self.model_name = ""
         self.path = None
-        self.gpu_split = None
 
         self.post_token_hooks = [
             PostTokenHooks.stream_tokens,
@@ -166,8 +162,8 @@ class model_backend(InferenceModel):
             target_dir = "models/" + self.model_name.replace("/", "_")
             snapshot_download(self.model_name, local_dir=target_dir, local_dir_use_symlinks=False, cache_dir="cache/", revision=utils.koboldai_vars.revision)
         self.model = self._get_model(self.get_local_model_path(), {})
-        self.model.load(self.gpu_split or None)
-
+        #TODO support GPU split
+        self.model.load(None)
         self.tokenizer = self._get_tokenizer(self.get_local_model_path())
 
         self.cache = ExLlamaV2Cache(self.model)
@@ -410,7 +406,7 @@ class model_backend(InferenceModel):
             self.model_config.prepare()
 
         # self.model_config.gpu_peer_fix = True
-        return LayerSplitExLlamaV2(self.model_config)
+        return ExLlamaV2(self.model_config)
 
     def _get_tokenizer(self, location: str):
         tokenizer = GenericTokenizer(LlamaTokenizer.from_pretrained(location))
@@ -418,51 +414,14 @@ class model_backend(InferenceModel):
 
     def get_requested_parameters(self, model_name, model_path, menu_path, parameters = {}):
         saved_data = {'max_ctx': 2048, 'compress_emb': 1, 'ntk_alpha': 1}
-        if os.path.exists("settings/{}.exllamav2.model_backend.settings".format(model_name.replace("/", "_"))) and 'base_url' not in vars(self):
-            with open("settings/{}.exllamav2.model_backend.settings".format(model_name.replace("/", "_")), "r") as f:
+        if os.path.exists("settings/{}.exllama.model_backend.settings".format(model_name.replace("/", "_"))) and 'base_url' not in vars(self):
+            with open("settings/{}.exllama.model_backend.settings".format(model_name.replace("/", "_")), "r") as f:
                 temp = json.load(f)
                 for key in temp:
                     saved_data[key] = temp[key]
         requested_parameters = []
         gpu_count = torch.cuda.device_count()
-        total_layer_count = self.model_config["n_layer"] if isinstance(self.model_config, dict) else self.model_config.num_layers if hasattr(self.model_config, "num_layers") else self.model_config.n_layer if hasattr(self.model_config, "n_layer") else self.model_config.num_hidden_layers if hasattr(self.model_config, 'num_hidden_layers') else None
-
-        requested_parameters.append({
-                                        "uitype": "Valid Display",
-                                        "unit": "text",
-                                        "label": "Current Allocated Layers: %1/{}".format(total_layer_count), #%1 will be the validation value
-                                        "id": "valid_layers",
-                                        "max": total_layer_count,
-                                        "step": 1,
-                                        "check": {"sum": ["{}_Layers".format(i) for i in range(gpu_count)], "value": total_layer_count, 'check': "="},
-                                        "menu_path": "Layers",
-                                        "extra_classes": "",
-                                        "refresh_model_inputs": False
-                                    })
-        saved_layer_count_per_device = saved_data.get("layers", [])
-        for i in range(gpu_count):
-            # If we don't have a saved layer count, assume a default configuration
-            # where the first device has all layers.
-            device_layer_count = total_layer_count if i == 0 else 0
-            if saved_layer_count_per_device and len(saved_layer_count_per_device) > i:
-                device_layer_count = saved_layer_count_per_device[i]
-
-            requested_parameters.append({
-                                            "uitype": "slider",
-                                            "unit": "int",
-                                            "label": "{} Layers".format(torch.cuda.get_device_name(i)),
-                                            "id": "{}_Layers".format(i),
-                                            "min": 0,
-                                            "max": total_layer_count,
-                                            "step": 1,
-                                            "check": {"sum": ["{}_Layers".format(i) for i in range(gpu_count)], "value": total_layer_count, 'check': "="},
-                                            "check_message": "The sum of assigned layers must equal {}".format(total_layer_count),
-                                            "default": device_layer_count,
-                                            "tooltip": "The number of layers to put on {}.".format(torch.cuda.get_device_name(i)),
-                                            "menu_path": "Layers",
-                                            "extra_classes": "",
-                                            "refresh_model_inputs": False
-                                        })
+        layer_count = self.model_config["n_layer"] if isinstance(self.model_config, dict) else self.model_config.num_layers if hasattr(self.model_config, "num_layers") else self.model_config.n_layer if hasattr(self.model_config, "n_layer") else self.model_config.num_hidden_layers if hasattr(self.model_config, 'num_hidden_layers') else None
 
         requested_parameters.append({
             "uitype": "slider",
@@ -513,19 +472,6 @@ class model_backend(InferenceModel):
 
     def set_input_parameters(self, parameters):
         gpu_count = torch.cuda.device_count()
-        layers = []
-        for i in range(gpu_count):
-            if isinstance(parameters["{}_Layers".format(i)], str) and parameters["{}_Layers".format(i)].isnumeric():
-                layers.append(int(parameters["{}_Layers".format(i)]))
-            elif isinstance(parameters["{}_Layers".format(i)], str):
-                 layers.append(None)
-            else:
-                layers.append(parameters["{}_Layers".format(i)])
-
-        self.layers = layers
-        self.gpu_split = []
-        for i, l in enumerate(layers):
-            self.gpu_split.append(l)
 
         self.model_config.max_seq_len = parameters["max_ctx"]
         self.model_config.compress_pos_emb = parameters["compress_emb"]
@@ -555,8 +501,7 @@ class model_backend(InferenceModel):
                 {
                     "max_ctx": self.model_config.max_seq_len,
                     "compress_emb": self.model_config.compress_pos_emb,
-                    "ntk_alpha": self.model_config.alpha_value,
-                    "layers": self.layers
+                    "ntk_alpha": self.model_config.alpha_value
                 },
                 f,
                 indent="",
